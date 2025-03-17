@@ -99,19 +99,17 @@ mcp install main.py
 
 ### Available Tools
 
-When connected to an AI assistant like Claude, the following tools will be available:
+When connected to an AI assistant like GitHub Copilot in VSCode Insiders or Claude, the following tools will be available:
 
 #### `get_table_schema`
-Get detailed schema information for a specific table.
-
+Get detailed schema information for a specific table including columns, data types, nullability, and relationships.
 Example:
 ```
 Can you show me the schema for the EMPLOYEES table?
 ```
 
 #### `get_tables_schema`
-Get schema information for multiple tables at once.
-
+Get schema information for multiple tables at once. More efficient than calling get_table_schema multiple times.
 Example:
 ```
 Please provide the schemas for both EMPLOYEES and DEPARTMENTS tables.
@@ -119,7 +117,6 @@ Please provide the schemas for both EMPLOYEES and DEPARTMENTS tables.
 
 #### `search_tables_schema`
 Search for tables by name pattern and retrieve their schemas.
-
 Example:
 ```
 Find all tables that might be related to customers and show their schemas.
@@ -127,7 +124,6 @@ Find all tables that might be related to customers and show their schemas.
 
 #### `rebuild_schema_cache`
 Force a rebuild of the schema cache. Use sparingly as this is resource-intensive.
-
 Example:
 ```
 The database structure has changed. Could you rebuild the schema cache?
@@ -135,10 +131,65 @@ The database structure has changed. Could you rebuild the schema cache?
 
 #### `get_database_vendor_info`
 Get information about the connected Oracle database version.
-
 Example:
 ```
 What Oracle database version are we running?
+```
+
+#### `search_columns`
+Search for tables containing columns that match a specific term. Useful when you know what data you need but aren't sure which tables contain it.
+Example:
+```
+Which tables have columns related to customer_id?
+```
+
+#### `get_pl_sql_objects`
+Get information about PL/SQL objects like procedures, functions, packages, triggers, etc.
+Example:
+```
+Show me all stored procedures that start with 'CUSTOMER_'
+```
+
+#### `get_object_source`
+Retrieve the source code for a PL/SQL object. Useful for debugging and understanding database logic.
+Example:
+```
+Can you show me the source code for the CUSTOMER_UPDATE_PROC procedure?
+```
+
+#### `get_table_constraints`
+Get all constraints (primary keys, foreign keys, unique constraints, check constraints) for a table.
+Example:
+```
+What constraints are defined on the ORDERS table?
+```
+
+#### `get_table_indexes`
+Get all indexes defined on a table, helpful for query optimization.
+Example:
+```
+Show me all indexes on the CUSTOMERS table.
+```
+
+#### `get_dependent_objects`
+Find all objects that depend on a specified database object.
+Example:
+```
+What objects depend on the CUSTOMER_VIEW view?
+```
+
+#### `get_user_defined_types`
+Get information about user-defined types in the database.
+Example:
+```
+Show me all custom types defined in the schema.
+```
+
+#### `get_related_tables`
+Get all tables that are related to a specified table through foreign keys, showing both incoming and outgoing relationships.
+Example:
+```
+What tables are related to the ORDERS table?
 ```
 
 ## Architecture
@@ -186,6 +237,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 For issues and questions:
-- Create an issue in our GitHub repository
-- Check our [FAQ](docs/FAQ.md) for common questions
-- Join our community discussions
+- Create an issue in this GitHub repository

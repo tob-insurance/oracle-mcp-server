@@ -135,25 +135,41 @@ async def get_tables_schema(table_names: List[str], ctx: Context) -> str:
 @mcp.tool()
 async def search_tables_schema(search_term: str, ctx: Context) -> str:
     """
-    Search for tables with names similar to the provided search term and return their schema information.
+    Search for tables with names similar to the provided search terms and return their schema information.
+    Multiple terms can be provided separated by commas or whitespace.
     Use this when you aren't sure of the exact table name but know part of it, or when exploring tables 
     related to a specific domain or function.
     
     Args:
-        search_term: A string to search for in table names (case-insensitive)
+        search_term: One or more strings to search for in table names (case-insensitive), separated by commas or spaces
     
     Returns:
         A formatted string containing the schema information for all matching tables (up to 20 tables)
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
-    # First just find matching table names (fast operation)
-    matching_tables = await db_context.search_tables(search_term, limit=20)
+    # Split search term by commas and whitespace and remove empty strings
+    search_terms = [term.strip() for term in search_term.replace(',', ' ').split()]
+    search_terms = [term for term in search_terms if term]
+    
+    if not search_terms:
+        return "No valid search terms provided"
+    
+    # Track all matching tables without duplicates
+    matching_tables = set()
+    
+    # Search for each term
+    for term in search_terms:
+        tables = await db_context.search_tables(term, limit=20)
+        matching_tables.update(tables)
+    
+    # Convert back to list and limit to 20 results
+    matching_tables = list(matching_tables)[:20]
     
     if not matching_tables:
-        return f"No tables found matching '{search_term}'"
+        return f"No tables found matching any of these terms: {', '.join(search_terms)}"
     
-    results = [f"Found {len(matching_tables)} tables matching '{search_term}':"]
+    results = [f"Found {len(matching_tables)} tables matching terms ({', '.join(search_terms)}):"]
     
     # Now load the schema for each matching table
     for table_name in matching_tables:

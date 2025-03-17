@@ -57,13 +57,14 @@ class DatabaseConnector:
             await conn.close()
 
     async def get_all_table_names(self) -> Set[str]:
-        """Get a list of all table names in the database"""
+        """Get a list of all table names in the database using optimized query"""
         conn = await self.get_connection()
         try:
             print("Getting list of all tables...", file=sys.stderr)
             cursor = conn.cursor()
+            # Using RESULT_CACHE hint for frequently accessed data
             await cursor.execute("""
-                SELECT table_name 
+                SELECT /*+ RESULT_CACHE */ table_name 
                 FROM all_tables 
                 WHERE owner = :owner
                 ORDER BY table_name
@@ -75,13 +76,13 @@ class DatabaseConnector:
             await conn.close()
     
     async def load_table_details(self, table_name: str) -> Optional[Dict[str, Any]]:
-        """Load detailed schema information for a specific table"""
+        """Load detailed schema information for a specific table with optimized queries"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
-            # Check if the table exists
+            # Check if the table exists using result cache
             await cursor.execute("""
-                SELECT COUNT(*) 
+                SELECT /*+ RESULT_CACHE */ COUNT(*) 
                 FROM all_tables 
                 WHERE owner = :owner AND table_name = :table_name
             """, owner=conn.username.upper(), table_name=table_name.upper())
@@ -90,10 +91,11 @@ class DatabaseConnector:
             if count[0] == 0:
                 return None
                 
-            # Get column information
+            # Get column information using result cache and index hints
             await cursor.execute("""
-                SELECT column_name, data_type, nullable
-                FROM all_tab_columns
+                SELECT /*+ RESULT_CACHE INDEX(atc) */ 
+                    column_name, data_type, nullable
+                FROM all_tab_columns atc
                 WHERE owner = :owner AND table_name = :table_name
                 ORDER BY column_id
             """, owner=conn.username.upper(), table_name=table_name.upper())
@@ -107,18 +109,20 @@ class DatabaseConnector:
                     "nullable": nullable == 'Y'
                 })
             
-            # Get relationship information
+            # Get relationship information using optimized join order and result cache
             await cursor.execute("""
-                SELECT acc.column_name,
-                       rcc.table_name AS referenced_table,
-                       rcc.column_name AS referenced_column
-                FROM all_cons_columns acc
-                JOIN all_constraints ac ON acc.constraint_name = ac.constraint_name
+                SELECT /*+ RESULT_CACHE LEADING(ac acc rcc) USE_NL(acc) USE_NL(rcc) */
+                    acc.column_name,
+                    rcc.table_name AS referenced_table,
+                    rcc.column_name AS referenced_column
+                FROM all_constraints ac
+                JOIN all_cons_columns acc ON acc.constraint_name = ac.constraint_name
+                                        AND acc.owner = ac.owner
                 JOIN all_cons_columns rcc ON rcc.constraint_name = ac.r_constraint_name
+                                        AND rcc.owner = ac.r_owner
                 WHERE ac.constraint_type = 'R'
-                AND acc.owner = :owner
-                AND acc.table_name = :table_name
-                AND rcc.owner = ac.r_owner
+                AND ac.owner = :owner
+                AND ac.table_name = :table_name
             """, owner=conn.username.upper(), table_name=table_name.upper())
             
             relationships = await cursor.fetchall()
@@ -141,17 +145,7 @@ class DatabaseConnector:
             await conn.close()
     
     async def get_pl_sql_objects(self, object_type: str, name_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get PL/SQL objects with caching"""
-        if not self.schema_manager:
-            raise RuntimeError("Schema manager not initialized")
-            
-        cache_key = f"{object_type}_{name_pattern or 'all'}"
-        
-        if self.schema_manager.is_cache_valid('plsql', cache_key):
-            self.schema_manager.cache_stats['hits'] += 1
-            return self.schema_manager.object_cache['plsql'][cache_key]['data']
-        
-        self.schema_manager.cache_stats['misses'] += 1
+        """Get PL/SQL objects"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
@@ -188,9 +182,6 @@ class DatabaseConnector:
                 
                 result.append(obj_info)
             
-            # Update cache through schema manager
-            self.schema_manager.update_cache('plsql', cache_key, result)
-            await self.schema_manager.save_cache()
             return result
         finally:
             await conn.close()
@@ -244,15 +235,7 @@ class DatabaseConnector:
             await conn.close()
     
     async def get_table_constraints(self, table_name: str) -> List[Dict[str, Any]]:
-        """Get table constraints with caching"""
-        if not self.schema_manager:
-            raise RuntimeError("Schema manager not initialized")
-            
-        if self.schema_manager.is_cache_valid('constraints', table_name):
-            self.schema_manager.cache_stats['hits'] += 1
-            return self.schema_manager.object_cache['constraints'][table_name]['data']
-        
-        self.schema_manager.cache_stats['misses'] += 1
+        """Get table constraints"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
@@ -326,23 +309,12 @@ class DatabaseConnector:
                 
                 result.append(constraint_info)
             
-            # Cache the results
-            self.schema_manager.update_cache('constraints', table_name, result)
-            await self.schema_manager.save_cache()
             return result
         finally:
             await conn.close()
     
     async def get_table_indexes(self, table_name: str) -> List[Dict[str, Any]]:
-        """Get table indexes with caching"""
-        if not self.schema_manager:
-            raise RuntimeError("Schema manager not initialized")
-            
-        if self.schema_manager.is_cache_valid('indexes', table_name):
-            self.schema_manager.cache_stats['hits'] += 1
-            return self.schema_manager.object_cache['indexes'][table_name]['data']
-        
-        self.schema_manager.cache_stats['misses'] += 1
+        """Get table indexes"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
@@ -387,9 +359,6 @@ class DatabaseConnector:
                 
                 result.append(index_info)
             
-            # Cache the results
-            self.schema_manager.update_cache('indexes', table_name, result)
-            await self.schema_manager.save_cache()
             return result
         finally:
             await conn.close()
@@ -401,13 +370,19 @@ class DatabaseConnector:
             cursor = conn.cursor()
             
             await cursor.execute("""
-                SELECT ao.object_name, ao.object_type, ao.owner
-                FROM all_dependencies ad
-                JOIN all_objects ao ON ad.name = ao.object_name 
-                                   AND ad.type = ao.object_type
-                                   AND ad.owner = ao.owner
-                WHERE ad.referenced_name = :object_name
-                AND ad.referenced_owner = :owner
+                WITH deps AS (
+                    SELECT /*+ MATERIALIZE */
+                           name, type, owner
+                    FROM all_dependencies
+                    WHERE referenced_name = :object_name
+                    AND referenced_owner = :owner
+                )
+                SELECT /*+ LEADING(deps) USE_NL(ao) INDEX(ao) */
+                    ao.object_name, ao.object_type, ao.owner
+                FROM deps
+                JOIN all_objects ao ON deps.name = ao.object_name 
+                                   AND deps.type = ao.object_type
+                                   AND deps.owner = ao.owner
             """, object_name=object_name, owner=conn.username.upper())
             
             dependencies = await cursor.fetchall()
@@ -428,16 +403,7 @@ class DatabaseConnector:
             await conn.close()
     
     async def get_user_defined_types(self, type_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get user-defined types with caching"""
-        if not self.schema_manager:
-            raise RuntimeError("Schema manager not initialized")
-            
-        cache_key = type_pattern or 'all'
-        if self.schema_manager.is_cache_valid('types', cache_key):
-            self.schema_manager.cache_stats['hits'] += 1
-            return self.schema_manager.object_cache['types'][cache_key]['data']
-        
-        self.schema_manager.cache_stats['misses'] += 1
+        """Get user-defined types"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
@@ -484,9 +450,219 @@ class DatabaseConnector:
                 
                 result.append(type_info)
             
-            # Cache the results
-            self.schema_manager.update_cache('types', cache_key, result)
-            await self.schema_manager.save_cache()
             return result
         finally:
             await conn.close()
+    
+    async def get_related_tables(self, table_name: str) -> Dict[str, List[str]]:
+        """Get all tables that are related to the specified table through foreign keys."""
+        conn = await self.get_connection()
+        try:
+            cursor = conn.cursor()
+            table_owner = conn.username.upper()
+            
+            # Get tables referenced by this table
+            await cursor.execute("""
+                SELECT /*+ RESULT_CACHE LEADING(ac acc) USE_NL(acc) */
+                    DISTINCT acc.table_name AS referenced_table
+                FROM all_constraints ac
+                JOIN all_cons_columns acc ON acc.constraint_name = ac.r_constraint_name
+                    AND acc.owner = ac.owner
+                WHERE ac.constraint_type = 'R'
+                AND ac.table_name = :table_name
+                AND ac.owner = :owner
+            """, table_name=table_name.upper(), owner=table_owner)
+            
+            referenced_tables = [row[0] for row in await cursor.fetchall()]
+            
+            # Get tables that reference this table
+            await cursor.execute("""
+                WITH pk_constraints AS (
+                    SELECT /*+ MATERIALIZE */ constraint_name
+                    FROM all_constraints
+                    WHERE table_name = :table_name
+                    AND constraint_type IN ('P', 'U')
+                    AND owner = :owner
+                )
+                SELECT /*+ RESULT_CACHE LEADING(ac pk) USE_NL(pk) */
+                    DISTINCT ac.table_name AS referencing_table
+                FROM all_constraints ac
+                JOIN pk_constraints pk ON ac.r_constraint_name = pk.constraint_name
+                WHERE ac.constraint_type = 'R'
+                AND ac.owner = :owner
+            """, table_name=table_name.upper(), owner=table_owner)
+            
+            referencing_tables = [row[0] for row in await cursor.fetchall()]
+            
+            return {
+                'referenced_tables': referenced_tables,
+                'referencing_tables': referencing_tables
+            }
+            
+        finally:
+            await conn.close()
+    
+    async def search_in_database(self, search_term: str, limit: int = 20) -> List[str]:
+        """Search for table names in the database using similarity matching"""
+        conn = await self.get_connection()
+        try:
+            cursor = conn.cursor()
+            # Use Oracle's built-in similarity features
+            await cursor.execute("""
+                SELECT /*+ RESULT_CACHE */ DISTINCT table_name 
+                FROM all_tables 
+                WHERE owner = :owner
+                AND (
+                    -- Direct matches first
+                    UPPER(table_name) LIKE '%' || :search_term || '%'
+                    -- Then similar names using built-in similarity calculation
+                    OR UTL_MATCH.EDIT_DISTANCE_SIMILARITY(
+                        UPPER(table_name),
+                        :search_term
+                    ) > 65  -- Minimum similarity threshold (65%)
+                )
+                ORDER BY 
+                    CASE 
+                        WHEN UPPER(table_name) LIKE '%' || :search_term || '%' THEN 0
+                        ELSE 1
+                    END,
+                    UTL_MATCH.EDIT_DISTANCE_SIMILARITY(
+                        UPPER(table_name),
+                        :search_term
+                    ) DESC
+            """, owner=conn.username.upper(), search_term=search_term.upper())
+            
+            results = await cursor.fetchall()
+            return [row[0] for row in results][:limit]
+            
+        finally:
+            await conn.close()
+            
+    async def search_columns_in_database(self, table_names: List[str], search_term: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Search for columns in specified tables"""
+        conn = await self.get_connection()
+        try:
+            cursor = conn.cursor()
+            result = {}
+            
+            # Get columns for the specified tables that match the search term
+            await cursor.execute("""
+                SELECT /*+ RESULT_CACHE */ 
+                    table_name,
+                    column_name,
+                    data_type,
+                    nullable
+                FROM all_tab_columns 
+                WHERE owner = :owner
+                AND table_name IN (SELECT column_value FROM TABLE(CAST(:table_names AS SYS.ODCIVARCHAR2LIST)))
+                AND UPPER(column_name) LIKE '%' || :search_term || '%'
+                ORDER BY table_name, column_id
+            """, owner=conn.username.upper(), 
+                table_names=table_names,
+                search_term=search_term.upper())
+            
+            rows = await cursor.fetchall()
+            
+            for table_name, column_name, data_type, nullable in rows:
+                if table_name not in result:
+                    result[table_name] = []
+                result[table_name].append({
+                    "name": column_name,
+                    "type": data_type,
+                    "nullable": nullable == 'Y'
+                })
+            
+            return result
+            
+        finally:
+            await conn.close()
+    
+    async def explain_query_plan(self, query: str) -> Dict[str, Any]:
+        """Get execution plan for a SQL query"""
+        conn = await self.get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # First create an explain plan
+            plan_statement = f"EXPLAIN PLAN FOR {query}"
+            await cursor.execute(plan_statement)
+            
+            # Then retrieve the execution plan with cost and cardinality information
+            await cursor.execute("""
+                SELECT 
+                    LPAD(' ', 2*LEVEL-2) || operation || ' ' || 
+                    options || ' ' || object_name || 
+                    CASE 
+                        WHEN cost IS NOT NULL THEN ' (Cost: ' || cost || ')'
+                        ELSE ''
+                    END || 
+                    CASE 
+                        WHEN cardinality IS NOT NULL THEN ' (Rows: ' || cardinality || ')'
+                        ELSE ''
+                    END as execution_plan_step
+                FROM plan_table
+                START WITH id = 0
+                CONNECT BY PRIOR id = parent_id
+                ORDER SIBLINGS BY position
+            """)
+            
+            plan_rows = await cursor.fetchall()
+            
+            # Clear the plan table for next time
+            await cursor.execute("DELETE FROM plan_table")
+            await conn.commit()
+            
+            # Also get some basic optimization hints based on query content
+            basic_analysis = self._analyze_query_for_optimization(query)
+            
+            return {
+                "execution_plan": [row[0] for row in plan_rows],
+                "optimization_suggestions": basic_analysis
+            }
+        except oracledb.Error as e:
+            print(f"Error explaining query: {str(e)}", file=sys.stderr)
+            return {
+                "execution_plan": [],
+                "optimization_suggestions": ["Unable to generate execution plan due to error."],
+                "error": str(e)
+            }
+        finally:
+            await conn.close()
+            
+    def _analyze_query_for_optimization(self, query: str) -> List[str]:
+        """Simple heuristic analysis of query for basic optimization suggestions"""
+        query = query.upper()
+        suggestions = []
+        
+        # Check for common inefficient patterns
+        if "SELECT *" in query:
+            suggestions.append("Consider selecting only needed columns instead of SELECT *")
+            
+        if " LIKE '%something" in query or " LIKE '%something%'" in query:
+            suggestions.append("Leading wildcards in LIKE predicates prevent index usage")
+            
+        if " IN (SELECT " in query and " EXISTS" not in query:
+            suggestions.append("Consider using EXISTS instead of IN with subqueries for better performance")
+            
+        if " OR " in query:
+            suggestions.append("OR conditions may prevent index usage. Consider UNION ALL of separated queries")
+            
+        if "/*+ " not in query and len(query) > 500:
+            suggestions.append("Complex query could benefit from optimizer hints")
+            
+        if " JOIN " in query:
+            if "/*+ LEADING" not in query and query.count("JOIN") > 2:
+                suggestions.append("Multi-table joins may benefit from LEADING hint to control join order")
+            
+            if "/*+ USE_NL" not in query and "/*+ USE_HASH" not in query and query.count("JOIN") > 1:
+                suggestions.append("Consider join method hints like USE_NL or USE_HASH for complex joins")
+        
+        # Count number of tables and joins
+        join_count = query.count(" JOIN ")
+        from_count = query.count(" FROM ")
+        table_count = max(from_count, join_count + 1)
+        
+        if table_count > 4:
+            suggestions.append(f"Query joins {table_count} tables - consider reviewing join order and conditions")
+            
+        return suggestions

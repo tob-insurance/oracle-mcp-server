@@ -39,7 +39,20 @@ class DatabaseContext:
         
     async def get_pl_sql_objects(self, object_type: str, name_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get information about PL/SQL objects of the specified type"""
-        return await self.db_connector.get_pl_sql_objects(object_type, name_pattern)
+        # First check schema manager cache
+        cache_key = f"{object_type}_{name_pattern or 'all'}"
+        if self.schema_manager.is_cache_valid('plsql', cache_key):
+            self.schema_manager.cache_stats['hits'] += 1
+            return self.schema_manager.object_cache['plsql'][cache_key]['data']
+        
+        # If not in cache or expired, get from database
+        self.schema_manager.cache_stats['misses'] += 1
+        result = await self.db_connector.get_pl_sql_objects(object_type, name_pattern)
+        
+        # Update cache
+        self.schema_manager.update_cache('plsql', cache_key, result)
+        await self.schema_manager.save_cache()
+        return result
         
     async def get_object_source(self, object_type: str, object_name: str) -> str:
         """Get the source code for a PL/SQL object"""
@@ -47,11 +60,35 @@ class DatabaseContext:
         
     async def get_table_constraints(self, table_name: str) -> List[Dict[str, Any]]:
         """Get constraints for a specific table"""
-        return await self.db_connector.get_table_constraints(table_name)
+        # Check cache first
+        if self.schema_manager.is_cache_valid('constraints', table_name):
+            self.schema_manager.cache_stats['hits'] += 1
+            return self.schema_manager.object_cache['constraints'][table_name]['data']
+        
+        # If not in cache or expired, get from database
+        self.schema_manager.cache_stats['misses'] += 1
+        result = await self.db_connector.get_table_constraints(table_name)
+        
+        # Update cache
+        self.schema_manager.update_cache('constraints', table_name, result)
+        await self.schema_manager.save_cache()
+        return result
         
     async def get_table_indexes(self, table_name: str) -> List[Dict[str, Any]]:
         """Get indexes for a specific table"""
-        return await self.db_connector.get_table_indexes(table_name)
+        # Check cache first
+        if self.schema_manager.is_cache_valid('indexes', table_name):
+            self.schema_manager.cache_stats['hits'] += 1
+            return self.schema_manager.object_cache['indexes'][table_name]['data']
+        
+        # If not in cache or expired, get from database
+        self.schema_manager.cache_stats['misses'] += 1
+        result = await self.db_connector.get_table_indexes(table_name)
+        
+        # Update cache
+        self.schema_manager.update_cache('indexes', table_name, result)
+        await self.schema_manager.save_cache()
+        return result
         
     async def get_dependent_objects(self, object_name: str) -> List[Dict[str, Any]]:
         """Get objects that depend on the specified object"""
@@ -59,4 +96,38 @@ class DatabaseContext:
         
     async def get_user_defined_types(self, type_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get information about user-defined types"""
-        return await self.db_connector.get_user_defined_types(type_pattern)
+        # Check cache first
+        cache_key = type_pattern or 'all'
+        if self.schema_manager.is_cache_valid('types', cache_key):
+            self.schema_manager.cache_stats['hits'] += 1
+            return self.schema_manager.object_cache['types'][cache_key]['data']
+        
+        # If not in cache or expired, get from database
+        self.schema_manager.cache_stats['misses'] += 1
+        result = await self.db_connector.get_user_defined_types(type_pattern)
+        
+        # Update cache
+        self.schema_manager.update_cache('types', cache_key, result)
+        await self.schema_manager.save_cache()
+        return result
+
+    async def get_related_tables(self, table_name: str) -> Dict[str, List[str]]:
+        """Get all tables that are related to the specified table through foreign keys."""
+        # Check cache first
+        cache_key = f"related_{table_name}"
+        if self.schema_manager.is_cache_valid('related_tables', cache_key):
+            self.schema_manager.cache_stats['hits'] += 1
+            return self.schema_manager.object_cache['related_tables'][cache_key]['data']
+        
+        # If not in cache or expired, get from database
+        self.schema_manager.cache_stats['misses'] += 1
+        result = await self.db_connector.get_related_tables(table_name)
+        
+        # Update cache
+        self.schema_manager.update_cache('related_tables', cache_key, result)
+        await self.schema_manager.save_cache()
+        return result
+
+    async def explain_query_plan(self, query: str) -> Dict[str, Any]:
+        """Get execution plan for an SQL query with optimization suggestions"""
+        return await self.db_connector.explain_query_plan(query)

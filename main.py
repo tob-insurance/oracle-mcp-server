@@ -45,13 +45,14 @@ print("FastMCP server initialized", file=sys.stderr)
 @mcp.tool()
 async def get_table_schema(table_name: str, ctx: Context) -> str:
     """
-    Get the schema information for a specific table.
+    Get the schema information for a specific table including columns, data types, nullability, and relationships.
+    Use this when you need to understand the structure of a particular table to write queries against it.
     
     Args:
-        table_name: The name of the table to get schema information for
+        table_name: The name of the table to get schema information for (case-insensitive)
     
     Returns:
-        A formatted string containing the table's schema information
+        A formatted string containing the table's schema information including columns and relationships
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     table_info = await db_context.get_schema_info(table_name)
@@ -95,7 +96,9 @@ async def rebuild_schema_cache(ctx: Context) -> str:
 @mcp.tool()
 async def get_tables_schema(table_names: List[str], ctx: Context) -> str:
     """
-    Get the schema information for multiple tables.
+    Get the schema information for multiple tables at once. 
+    This is much faster than calling get_table_schema for each table.
+    If you want to get the schema for multiple tables, always prefer this function.
     
     Args:
         table_names: A list of table names to get schema information for
@@ -133,12 +136,14 @@ async def get_tables_schema(table_names: List[str], ctx: Context) -> str:
 async def search_tables_schema(search_term: str, ctx: Context) -> str:
     """
     Search for tables with names similar to the provided search term and return their schema information.
+    Use this when you aren't sure of the exact table name but know part of it, or when exploring tables 
+    related to a specific domain or function.
     
     Args:
         search_term: A string to search for in table names (case-insensitive)
     
     Returns:
-        A formatted string containing the schema information for all matching tables
+        A formatted string containing the schema information for all matching tables (up to 20 tables)
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
@@ -208,13 +213,14 @@ async def get_database_vendor_info(ctx: Context) -> str:
 async def search_columns(search_term: str, ctx: Context) -> str:
     """
     Search for tables containing columns that match the provided search term.
-    This helps find relevant tables when you know the column name but not the table name.
+    This is extremely useful when you know what data you need (like 'customer_id' or 'order_date') 
+    but aren't sure which tables contain this information. Essential for exploring large databases.
     
     Args:
         search_term: A string to search for in column names (case-insensitive)
     
     Returns:
-        A formatted string listing tables and their matching columns
+        A formatted string listing tables and their matching columns (up to 50 results)
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
@@ -230,7 +236,7 @@ async def search_columns(search_term: str, ctx: Context) -> str:
             results.append(f"\nTable: {table_name}")
             results.append("Matching columns:")
             for col in columns:
-                nullable = "NULL" if col.get("nullable", True) else "NOT NULL"
+                nullable = "NULL" if col["nullable"] else "NOT NULL"
                 results.append(f"  - {col['name']}: {col['type']} {nullable}")
         
         return "\n".join(results)
@@ -241,10 +247,12 @@ async def search_columns(search_term: str, ctx: Context) -> str:
 async def get_pl_sql_objects(object_type: str, name_pattern: Optional[str], ctx: Context) -> str:
     """
     Get information about PL/SQL objects (procedures, functions, packages, triggers, etc).
+    Use this to discover existing database code objects for analysis or debugging purposes.
     
     Args:
         object_type: Type of object to search for (PROCEDURE, FUNCTION, PACKAGE, TRIGGER, TYPE, etc.)
         name_pattern: Pattern to filter object names (case-insensitive, supports % wildcards)
+                     e.g., "CUSTOMER%" will find all objects starting with "CUSTOMER"
     
     Returns:
         A formatted string containing information about the matching PL/SQL objects
@@ -278,14 +286,15 @@ async def get_pl_sql_objects(object_type: str, name_pattern: Optional[str], ctx:
 @mcp.tool()
 async def get_object_source(object_type: str, object_name: str, ctx: Context) -> str:
     """
-    Get the source code for a PL/SQL object.
+    Get the source code for a PL/SQL object (procedure, function, package, trigger, etc.).
+    Essential for debugging, understanding, or optimizing existing database code.
     
     Args:
         object_type: Type of object (PROCEDURE, FUNCTION, PACKAGE, TRIGGER, etc.)
         object_name: Name of the object to retrieve source for
     
     Returns:
-        A string containing the source code of the requested object
+        A string containing the complete source code of the requested object
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
@@ -303,12 +312,14 @@ async def get_object_source(object_type: str, object_name: str, ctx: Context) ->
 async def get_table_constraints(table_name: str, ctx: Context) -> str:
     """
     Get constraints (primary keys, foreign keys, unique constraints, check constraints) for a table.
+    Use this to understand the data integrity rules, relationships, and business rules encoded in the database.
+    Critical for writing valid INSERT/UPDATE statements and understanding join conditions.
     
     Args:
         table_name: The name of the table to get constraints for
     
     Returns:
-        A formatted string containing the table's constraints
+        A formatted string containing the table's constraints with detailed information
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
@@ -343,13 +354,15 @@ async def get_table_constraints(table_name: str, ctx: Context) -> str:
 @mcp.tool()
 async def get_table_indexes(table_name: str, ctx: Context) -> str:
     """
-    Get indexes defined on a table.
+    Get indexes defined on a table. 
+    Essential for query optimization and understanding performance characteristics of the table.
+    Use this information to improve query performance by leveraging existing indexes or suggesting new ones.
     
     Args:
         table_name: The name of the table to get indexes for
     
     Returns:
-        A formatted string containing the table's indexes
+        A formatted string containing the table's indexes including column information
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
@@ -443,32 +456,42 @@ async def get_user_defined_types(type_pattern: Optional[str], ctx: Context) -> s
         return f"Error retrieving user-defined types: {str(e)}"
 
 @mcp.tool()
-async def get_cache_stats(ctx: Context) -> str:
+async def get_related_tables(table_name: str, ctx: Context) -> str:
     """
-    Get statistics about the cache performance and current cache size.
+    Get all tables that are related to the specified table through foreign keys.
+    This tool is critical for understanding the database schema relationships and building proper JOINs.
+    Shows both tables referenced by this table and tables that reference this table.
+    
+    Args:
+        table_name: The name of the table to find relationships for
     
     Returns:
-        A formatted string containing cache statistics
+        A formatted string showing all related tables in both directions (incoming and outgoing relationships)
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
     
-    stats = db_context.schema_manager.get_cache_stats()
-    
-    results = ["Cache Statistics:"]
-    results.append(f"\nHits: {stats['hits']}")
-    results.append(f"Misses: {stats['misses']}")
-    hit_ratio = stats['hits'] / (stats['hits'] + stats['misses']) * 100 if (stats['hits'] + stats['misses']) > 0 else 0
-    results.append(f"Hit Ratio: {hit_ratio:.2f}%")
-    
-    results.append("\nCache Size:")
-    for cache_type, size in stats['size'].items():
-        results.append(f"- {cache_type}: {size} objects")
-    
-    last_refresh = time.strftime('%Y-%m-%d %H:%M:%S', 
-                                time.localtime(stats['last_full_refresh']))
-    results.append(f"\nLast Full Refresh: {last_refresh}")
-    
-    return "\n".join(results)
+    try:
+        related = await db_context.get_related_tables(table_name)
+        
+        if not related['referenced_tables'] and not related['referencing_tables']:
+            return f"No related tables found for '{table_name}'"
+        
+        results = [f"Tables related to '{table_name}':"]
+        
+        if related['referenced_tables']:
+            results.append("\nTables referenced by this table (outgoing foreign keys):")
+            for table in related['referenced_tables']:
+                results.append(f"  - {table}")
+        
+        if related['referencing_tables']:
+            results.append("\nTables that reference this table (incoming foreign keys):")
+            for table in related['referencing_tables']:
+                results.append(f"  - {table}")
+        
+        return "\n".join(results)
+        
+    except Exception as e:
+        return f"Error getting related tables: {str(e)}"
 
 if __name__ == "__main__":
     mcp.run()

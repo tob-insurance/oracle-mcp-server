@@ -20,13 +20,15 @@ class SchemaManager(SchemaManagerProtocol):
             'plsql': {},
             'constraints': {},
             'indexes': {},
-            'types': {}
+            'types': {},
+            'related_tables': {}  # Added cache for related tables
         }
         self.ttl = {
-            'plsql': 1800,     # 30 minutes
-            'constraints': 3600,  # 1 hour
-            'indexes': 3600,     # 1 hour
-            'types': 3600       # 1 hour
+            'plsql': 1800,        # 30 minutes
+            'constraints': 3600,   # 1 hour
+            'indexes': 3600,      # 1 hour
+            'types': 3600,        # 1 hour
+            'related_tables': 1800 # 30 minutes - relationships might change more frequently
         }
 
     async def build_schema_index(self) -> Dict[str, TableInfo]:
@@ -141,15 +143,37 @@ class SchemaManager(SchemaManagerProtocol):
         return self.cache.tables.get(table_name)
 
     async def search_tables(self, search_term: str, limit: int = 20) -> List[str]:
-        """Search for table names matching the search term"""
+        """
+        Search for table names matching the search term.
+        First searches in cache, then falls back to database search if needed.
+        """
         if not self.cache:
             self.cache = await self.load_or_build_cache()
             
         search_term = search_term.upper()
+        
+        # First try exact/substring matches in cache
         matching_tables = [
             table_name for table_name in self.cache.all_table_names
             if search_term in table_name
         ]
+        
+        # If we don't have enough results, search in the database
+        if len(matching_tables) < limit:
+            try:
+                db_results = await self.db_connector.search_in_database(search_term, limit)
+                
+                # Add new tables to our cache
+                new_tables = [table for table in db_results if table not in matching_tables]
+                matching_tables.extend(new_tables)
+                
+                # Update cache with any new tables found
+                if new_tables:
+                    self.cache.all_table_names.update(new_tables)
+                    await self.save_cache()
+                    
+            except Exception as e:
+                print(f"Error during database table search: {str(e)}", file=sys.stderr)
         
         # Return the first 'limit' matching tables
         return matching_tables[:limit]
@@ -164,52 +188,45 @@ class SchemaManager(SchemaManagerProtocol):
         
         # First check in cached tables to avoid database queries for already loaded tables
         for table_name, table_info in self.cache.tables.items():
+            if not table_info.fully_loaded:
+                continue
+                
             for column in table_info.columns:
                 if search_term in column["name"].upper():
                     if table_name not in result:
                         result[table_name] = []
                     result[table_name].append(column)
         
-        # If we have enough results already, return them
-        if len(result) >= limit:
-            # Just return the first 'limit' tables
-            return dict(list(result.items())[:limit])
-        
-        # If we don't have enough results, search in all tables
-        # We'll sample some uncached tables to see if we find columns matching the search term
-        uncached_tables = [
-            t for t in self.cache.all_table_names 
-            if t not in self.cache.tables
-        ]
-        
-        # Shuffle to get a random sample of tables
-        import random
-        random.shuffle(uncached_tables)
-        
-        # Sample a reasonable number of tables to search
-        sample_size = min(100, len(uncached_tables))
-        sampled_tables = uncached_tables[:sample_size]
-        
-        for table_name in sampled_tables:
-            # Skip if we already have enough tables
-            if len(result) >= limit:
-                break
-                
-            # Load table details
-            table_info = await self.get_schema_info(table_name)
-            if not table_info:
-                continue
-                
-            # Check if any columns match
-            matching_columns = [
-                col for col in table_info.columns
-                if search_term in col["name"].upper()
+        # If we don't have enough results, search in uncached tables
+        if len(result) < limit:
+            uncached_tables = [
+                t for t in self.cache.all_table_names 
+                if t not in self.cache.tables or not self.cache.tables[t].fully_loaded
             ]
             
-            if matching_columns:
-                result[table_name] = matching_columns
+            if uncached_tables:
+                try:
+                    # Search for columns in uncached tables using database connector
+                    db_results = await self.db_connector.search_columns_in_database(uncached_tables, search_term)
+                    
+                    # Merge database results with cache results
+                    for table_name, columns in db_results.items():
+                        if table_name not in result:  # Only add if not already in cache results
+                            result[table_name] = columns
+                            
+                            # Update cache with the new column information
+                            if table_name not in self.cache.tables:
+                                self.cache.tables[table_name] = TableInfo(
+                                    columns=columns,
+                                    relationships={},
+                                    fully_loaded=True
+                                )
+                                await self.save_cache()
+                                
+                except Exception as e:
+                    print(f"Error during database column search: {str(e)}", file=sys.stderr)
         
-        return result
+        return dict(list(result.items())[:limit])
 
     async def initialize(self) -> None:
         """Initialize the database context and build initial cache"""

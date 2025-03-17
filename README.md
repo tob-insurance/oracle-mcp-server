@@ -1,6 +1,24 @@
-# MCP Oracle DB Context
+# MCP Server - Oracle DB Context
 
 A powerful Model Context Protocol (MCP) server that provides contextual database schema information for large Oracle databases, enabling AI assistants to understand and work with databases containing thousands of tables.
+
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Installing uv](#installing-uv)
+  - [Project Setup](#project-setup)
+- [Usage](#usage)
+  - [Starting the Server](#starting-the-server)
+  - [Available Tools](#available-tools)
+  - [Integration with GitHub Copilot in VSCode Insiders](#integration-with-github-copilot-in-vscode-insiders)
+- [Architecture](#architecture)
+- [System Requirements](#system-requirements)
+- [Performance Considerations](#performance-considerations)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support](#support)
 
 ## Overview
 
@@ -76,7 +94,49 @@ Make sure to restart your terminal after installing uv.
 
 ## Usage
 
-### Starting the Server
+### Integration with GitHub Copilot in VSCode Insiders
+
+To use this MCP server with GitHub Copilot in VSCode Insiders, follow these steps:
+
+1. **Install VSCode Insiders**
+   - Download and install the latest version of [VSCode Insiders](https://code.visualstudio.com/insiders/)
+
+2. **Install GitHub Copilot Extension**
+   - Open VSCode Insiders
+   - Go to the Extensions marketplace
+   - Search for and install "GitHub Copilot"
+
+3. **Configure MCP Server**
+   - Open your VSCode Insiders settings.json file (User or Workspace)
+   - Add the following configuration:
+   ```json
+   "mcp": {
+       "inputs": [],
+       "servers": {
+           "db-context": {
+               "command": "/path/to/your/.local/bin/uv",
+               "args": [
+                   "--directory",
+                   "/path/to/your/mcp-db-context",
+                   "run",
+                   "main.py"
+               ],
+               "env": {}
+           }
+       }
+   }
+   ```
+   Replace the paths with your actual uv binary path and mcp-db-context directory path.
+
+4. **Enable Agent Mode**
+   - Open Copilot chat in VSCode Insiders
+   - Click on "Copilot Edits"
+   - Choose "Agent mode"
+   - Click the refresh button in the chat input to load the available tools
+
+After completing these steps, you'll have access to all database context tools through GitHub Copilot's chat interface.
+
+### Starting the Server locally
 
 To run the MCP server directly:
 

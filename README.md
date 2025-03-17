@@ -25,11 +25,24 @@ By intelligently caching and serving database schema information, this server al
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.12 or higher
+- uv package manager (recommended over pip)
 - Oracle database access
-- Oracle instant client (for the `oracledb` Python package)
+- Oracle instant client (required for the `oracledb` Python package)
 
-### Setup
+### Installing uv
+
+```bash
+# Install uv using curl (macOS/Linux)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or using PowerShell (Windows)
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+Make sure to restart your terminal after installing uv.
+
+### Project Setup
 
 1. Clone this repository:
    ```bash
@@ -37,44 +50,50 @@ By intelligently caching and serving database schema information, this server al
    cd mcp-db-context
    ```
 
-2. Create a virtual environment and install dependencies:
+2. Create and activate a virtual environment using uv:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   # Create virtual environment
+   uv venv
    
-   # Using uv (recommended)
-   uv pip install -e .
+   # Activate (On Unix/macOS)
+   source .venv/bin/activate
    
-   # Or with pip
-   pip install -e .
+   # Activate (On Windows)
+   .venv\Scripts\activate
    ```
 
-3. Create a `.env` file with your Oracle connection string:
+3. Install dependencies:
+   ```bash
+   # Install in development mode
+   uv pip install -e .
    ```
+
+4. Create a `.env` file with your Oracle connection details:
+   ```bash
    ORACLE_CONNECTION_STRING=username/password@hostname:port/service_name
    CACHE_DIR=.cache  # Optional: defaults to .cache
    ```
 
 ## Usage
 
-### Running the Server
+### Starting the Server
 
-To start the MCP server:
+To run the MCP server directly:
 
 ```bash
-python main.py
+uv run main.py
 ```
 
-For development and testing, you can use MCP's development tools:
+For development and testing:
 
 ```bash
-# Install MCP CLI tools if you haven't already
-pip install "mcp[cli]"
+# Install the MCP Inspector
+uv pip install mcp-cli
 
-# Run in development mode with the MCP Inspector
+# Test with MCP Inspector
 mcp dev main.py
 
-# Install in Claude Desktop
+# Or install in Claude Desktop
 mcp install main.py
 ```
 
@@ -122,31 +141,51 @@ Example:
 What Oracle database version are we running?
 ```
 
-## How It Works
+## Architecture
 
-This MCP server works by:
+This MCP server employs a three-layer architecture optimized for large-scale Oracle databases:
 
-1. **Initial Cache Building**: When first started, it builds a cache of all table names in the database.
-2. **On-Demand Schema Loading**: Detailed table information is only loaded when requested, minimizing database load.
-3. **Persistent Cache**: Schema information is cached to disk to improve performance across restarts.
-4. **Resource Optimization**: The architecture is designed for databases with thousands of tables where loading everything would be impractical.
+1. **DatabaseConnector Layer**
+   - Manages Oracle database connections and query execution
+   - Implements connection pooling and retry logic
+   - Handles raw SQL operations
 
-The server uses a three-layer architecture:
+2. **SchemaManager Layer**
+   - Implements intelligent schema caching
+   - Provides optimized schema lookup and search
+   - Manages the persistent cache on disk
 
-- **DatabaseConnector**: Handles raw Oracle database connections and queries
-- **SchemaManager**: Manages the schema cache and provides optimized schema access
-- **DatabaseContext**: Provides a high-level interface for the MCP tools
+3. **DatabaseContext Layer**
+   - Exposes high-level MCP tools and interfaces
+   - Handles authorization and access control
+   - Provides schema optimization for AI consumption
 
-## Technical Requirements
+## System Requirements
 
-- **Oracle Database**: This MCP server requires an Oracle database and connection credentials
-- **Memory Requirements**: For very large databases (10,000+ tables), ensure your machine has at least 4GB of available memory
-- **Disk Space**: The schema cache is stored as a JSON file, typically a few MB in size
+- **Python**: Version 3.12 or higher (required for optimal performance)
+- **Memory**: 4GB+ available RAM for large databases (10,000+ tables)
+- **Disk**: Minimum 500MB free space for schema cache
+- **Oracle**: Compatible with Oracle Database 11g and higher
+- **Network**: Stable connection to Oracle database server
+
+## Performance Considerations
+
+- Initial cache building may take 5-10 minutes for very large databases
+- Subsequent startups typically take less than 30 seconds
+- Schema lookups are generally sub-second after caching
+- Memory usage scales with active schema size
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+For issues and questions:
+- Create an issue in our GitHub repository
+- Check our [FAQ](docs/FAQ.md) for common questions
+- Join our community discussions

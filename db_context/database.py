@@ -121,8 +121,9 @@ class DatabaseConnector:
             
             # Get relationship information using optimized join order and result cache
             await cursor.execute("""
-                SELECT /*+ RESULT_CACHE LEADING(ac acc rcc) USE_NL(acc) USE_NL(rcc) */
-                    acc.column_name,
+                SELECT /*+ RESULT_CACHE */
+                    'OUTGOING' AS relationship_direction,
+                    acc.column_name AS source_column,
                     rcc.table_name AS referenced_table,
                     rcc.column_name AS referenced_column
                 FROM all_constraints ac
@@ -133,16 +134,40 @@ class DatabaseConnector:
                 WHERE ac.constraint_type = 'R'
                 AND ac.owner = :owner
                 AND ac.table_name = :table_name
+
+                UNION ALL
+
+                SELECT /*+ RESULT_CACHE */
+                    'INCOMING' AS relationship_direction,
+                    rcc.column_name AS source_column,
+                    ac.table_name AS referenced_table,
+                    acc.column_name AS referenced_column
+                FROM all_constraints ac
+                JOIN all_cons_columns acc ON acc.constraint_name = ac.constraint_name
+                                        AND acc.owner = ac.owner
+                JOIN all_cons_columns rcc ON rcc.constraint_name = ac.r_constraint_name
+                                        AND rcc.owner = ac.r_owner
+                WHERE ac.constraint_type = 'R'
+                AND ac.r_owner = :owner
+                AND ac.r_constraint_name IN (
+                    SELECT constraint_name 
+                    FROM all_constraints
+                    WHERE owner = :owner
+                    AND table_name = :table_name
+                    AND constraint_type IN ('P', 'U')
+                )
             """, owner=schema, table_name=table_name.upper())
             
             relationships = await cursor.fetchall()
             relationship_info = {}
-            for column, ref_table, ref_column in relationships:
-                relationship_info[ref_table] = {
-                    "local_column": column,
-                    "foreign_column": ref_column
-                }
-            
+            for direction, column, ref_table, ref_column in relationships:
+                if ref_table not in relationship_info:
+                    relationship_info[ref_table] = {
+                        "local_column": column,
+                        "foreign_column": ref_column,
+                        "direction": direction
+                    }
+                
             return {
                 "columns": column_info,
                 "relationships": relationship_info

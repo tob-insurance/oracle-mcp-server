@@ -70,22 +70,8 @@ async def get_table_schema(table_name: str, ctx: Context) -> str:
     if not table_info:
         return f"Table '{table_name}' not found in the schema."
     
-    # Format the response
-    result = [f"Table: {table_name}"]
-    result.append("\nColumns:")
-    for column in table_info.columns:
-        nullable = "NULL" if column["nullable"] else "NOT NULL"
-        result.append(f"  - {column['name']}: {column['type']} {nullable}")
-    
-    if table_info.relationships:
-        result.append("\nRelationships:")
-        for ref_table, rel in table_info.relationships.items():
-            result.append(
-                f"  - References {ref_table}({rel['foreign_column']}) "
-                f"through {rel['local_column']}"
-            )
-    
-    return "\n".join(result)
+    # Delegate formatting to the TableInfo model
+    return table_info.format_schema()
 
 @mcp.tool()
 async def rebuild_schema_cache(ctx: Context) -> str:
@@ -142,20 +128,8 @@ async def get_tables_schema(table_names: List[str], ctx: Context) -> str:
             results.append(f"\nTable '{table_name}' not found in the schema.")
             continue
         
-        # Format the table info
-        results.append(f"\nTable: {table_name}")
-        results.append("Columns:")
-        for column in table_info.columns:
-            nullable = "NULL" if column["nullable"] else "NOT NULL"
-            results.append(f"  - {column['name']}: {column['type']} {nullable}")
-        
-        if table_info.relationships:
-            results.append("Relationships:")
-            for ref_table, rel in table_info.relationships.items():
-                results.append(
-                    f"  - References {ref_table}({rel['foreign_column']}) "
-                    f"through {rel['local_column']}"
-                )
+        # Delegate formatting to the TableInfo model
+        results.append(table_info.format_schema())
     
     return "\n".join(results)
 
@@ -213,19 +187,8 @@ async def search_tables_schema(search_term: str, ctx: Context) -> str:
         if not table_info:
             continue
         
-        results.append(f"\nTable: {table_name}")
-        results.append("Columns:")
-        for column in table_info.columns:
-            nullable = "NULL" if column["nullable"] else "NOT NULL"
-            results.append(f"  - {column['name']}: {column['type']} {nullable}")
-        
-        if table_info.relationships:
-            results.append("Relationships:")
-            for ref_table, rel in table_info.relationships.items():
-                results.append(
-                    f"  - References {ref_table}({rel['foreign_column']}) "
-                    f"through {rel['local_column']}"
-                )
+        # Delegate formatting to the TableInfo model
+        results.append(table_info.format_schema())
     
     return "\n".join(results)
 

@@ -162,11 +162,12 @@ class DatabaseConnector:
             relationship_info = {}
             for direction, column, ref_table, ref_column in relationships:
                 if ref_table not in relationship_info:
-                    relationship_info[ref_table] = {
-                        "local_column": column,
-                        "foreign_column": ref_column,
-                        "direction": direction
-                    }
+                    relationship_info[ref_table] = []
+                relationship_info[ref_table].append({
+                    "local_column": column,
+                    "foreign_column": ref_column,
+                    "direction": direction
+                })
                 
             return {
                 "columns": column_info,

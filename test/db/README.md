@@ -31,6 +31,7 @@ docker-compose logs -f
 
 ## Connection Details
 
+### Main Schema (Complex)
 - Hostname: localhost
 - Port: 1521
 - Service Name: FREEPDB1
@@ -38,15 +39,33 @@ docker-compose logs -f
 - Test Password: testpass
 - Connection String: testuser/testpass@//localhost:1521/FREEPDB1
 
-## Sample Data
+### Simple Schema
+- User: simpleschema
+- Password: simplepass
+- Connection String: simpleschema/simplepass@//localhost:1521/FREEPDB1
 
-The database is initialized with the following tables:
+Note: The testuser has SELECT privileges on the simpleschema tables for demonstration purposes.
+
+## Schema Structure
+
+### Main Schema (testuser)
+Contains a comprehensive set of tables across multiple domains:
 - customers
 - orders
 - products
 - order_items
+- (and many more business domain tables)
 
-These tables are populated with sample data that can be used for testing the database context provider.
+### Simple Schema (simpleschema)
+Contains a basic set of tables:
+- categories
+- items
+
+The simple schema is useful for demonstrating cross-schema queries and schema switching functionality.
+
+## Sample Data
+
+Both schemas are pre-populated with sample data. The main schema contains extensive test data across all domains, while the simple schema contains a basic set of categories and items.
 
 ## Stopping the Database
 

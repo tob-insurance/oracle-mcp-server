@@ -9,7 +9,10 @@ from ..models import TableInfo, SchemaCache, SchemaManager as SchemaManagerProto
 class SchemaManager(SchemaManagerProtocol):
     def __init__(self, db_connector: Any, cache_path: Path):
         self.db_connector = db_connector
-        self.cache_path = cache_path
+        # Base cache directory
+        self.cache_base_path = cache_path
+        # Actual cache file path will be set after we get the schema name
+        self.cache_path = None
         self.cache: Optional[SchemaCache] = None
         self.cache_stats = {
             'hits': 0,
@@ -31,6 +34,17 @@ class SchemaManager(SchemaManagerProtocol):
             'related_tables': 1800 # 30 minutes - relationships might change more frequently
         }
 
+    async def _initialize_cache_path(self) -> None:
+        """Initialize the cache file path using the schema name"""
+        # Get the schema name from the database connector
+        conn = await self.db_connector.get_connection()
+        try:
+            schema_name = await self.db_connector._get_effective_schema(conn)
+            # Create schema-specific cache file name
+            self.cache_path = self.cache_base_path.parent / f"{schema_name.lower()}.json"
+        finally:
+            await conn.close()
+
     async def build_schema_index(self) -> Dict[str, TableInfo]:
         """
         Build a basic schema index with just table names.
@@ -49,9 +63,13 @@ class SchemaManager(SchemaManagerProtocol):
 
     async def load_or_build_cache(self, force_rebuild: bool = False) -> SchemaCache:
         """Load the schema cache from disk or rebuild it if needed"""
+        # Initialize cache path if not already set
+        if self.cache_path is None:
+            await self._initialize_cache_path()
+
         if not force_rebuild and self.cache_path.exists():
             try:
-                print("Opening existing index file...", file=sys.stderr)
+                print(f"Opening existing index file for schema: {self.cache_path.stem}...", file=sys.stderr)
                 with open(self.cache_path, 'r') as f:
                     data = json.load(f)
                     print("Loading index in memory...", file=sys.stderr)
@@ -90,10 +108,10 @@ class SchemaManager(SchemaManagerProtocol):
     async def save_cache(self, cache: Optional[SchemaCache] = None) -> None:
         """Save the current cache to disk"""
         cache_to_save = cache or self.cache
-        if not cache_to_save:
+        if not cache_to_save or not self.cache_path:
             return
             
-        print("Saving updated index to disk...", file=sys.stderr)
+        print(f"Saving updated index to disk for schema: {self.cache_path.stem}...", file=sys.stderr)
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.cache_path, 'w') as f:
             json.dump({

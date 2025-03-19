@@ -6,9 +6,10 @@ from pathlib import Path
 from .models import SchemaManager
 
 class DatabaseConnector:
-    def __init__(self, connection_string: str):
+    def __init__(self, connection_string: str, target_schema: Optional[str] = None):
         self.connection_string = connection_string
         self.schema_manager: Optional[SchemaManager] = None  # Will be set by DatabaseContext
+        self.target_schema: Optional[str] = target_schema
         
     def set_schema_manager(self, schema_manager: SchemaManager) -> None:
         """Set the schema manager reference"""
@@ -25,6 +26,12 @@ class DatabaseConnector:
         except Exception as e:
             print(f"Unexpected error while connecting to database: {str(e)}", file=sys.stderr)
             raise
+
+    async def _get_effective_schema(self, conn) -> str:
+        """Get the effective schema to use (either target_schema or connection user)"""
+        if self.target_schema:
+            return self.target_schema.upper()
+        return conn.username.upper()
 
     async def get_database_info(self) -> Dict[str, Any]:
         """Get information about the database vendor and version"""
@@ -43,6 +50,7 @@ class DatabaseConnector:
                 full_version = version_info[0][0]
                 vendor_info["vendor"] = "Oracle"
                 vendor_info["version"] = full_version
+                vendor_info["schema"] = await self._get_effective_schema(conn)
                 
                 # Additional version info rows
                 additional_info = [row[0] for row in version_info[1:] if row[0]]
@@ -62,13 +70,14 @@ class DatabaseConnector:
         try:
             print("Getting list of all tables...", file=sys.stderr)
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             # Using RESULT_CACHE hint for frequently accessed data
             await cursor.execute("""
                 SELECT /*+ RESULT_CACHE */ table_name 
                 FROM all_tables 
                 WHERE owner = :owner
                 ORDER BY table_name
-            """, owner=conn.username.upper())
+            """, owner=schema)
             
             all_tables = await cursor.fetchall()
             return {t[0] for t in all_tables}
@@ -80,12 +89,13 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             # Check if the table exists using result cache
             await cursor.execute("""
                 SELECT /*+ RESULT_CACHE */ COUNT(*) 
                 FROM all_tables 
                 WHERE owner = :owner AND table_name = :table_name
-            """, owner=conn.username.upper(), table_name=table_name.upper())
+            """, owner=schema, table_name=table_name.upper())
             
             count = await cursor.fetchone()
             if count[0] == 0:
@@ -98,7 +108,7 @@ class DatabaseConnector:
                 FROM all_tab_columns atc
                 WHERE owner = :owner AND table_name = :table_name
                 ORDER BY column_id
-            """, owner=conn.username.upper(), table_name=table_name.upper())
+            """, owner=schema, table_name=table_name.upper())
             
             columns = await cursor.fetchall()
             column_info = []
@@ -123,7 +133,7 @@ class DatabaseConnector:
                 WHERE ac.constraint_type = 'R'
                 AND ac.owner = :owner
                 AND ac.table_name = :table_name
-            """, owner=conn.username.upper(), table_name=table_name.upper())
+            """, owner=schema, table_name=table_name.upper())
             
             relationships = await cursor.fetchall()
             relationship_info = {}
@@ -149,9 +159,10 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             
             where_clause = "WHERE owner = :owner AND object_type = :object_type"
-            params = {"owner": conn.username.upper(), "object_type": object_type}
+            params = {"owner": schema, "object_type": object_type}
             
             if name_pattern:
                 where_clause += " AND object_name LIKE :name_pattern"
@@ -172,7 +183,7 @@ class DatabaseConnector:
                     "name": name,
                     "type": obj_type,
                     "status": status,
-                    "owner": conn.username.upper()
+                    "owner": schema
                 }
                 
                 if created:
@@ -191,6 +202,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             
             # Handle different object types accordingly
             if object_type in ('PACKAGE', 'PACKAGE BODY', 'TYPE', 'TYPE BODY'):
@@ -202,7 +214,7 @@ class DatabaseConnector:
                     AND name = :name 
                     AND type = :type
                     ORDER BY line
-                """, owner=conn.username.upper(), name=object_name, type=object_type)
+                """, owner=schema, name=object_name, type=object_type)
                 
                 source_lines = await cursor.fetchall()
                 if not source_lines:
@@ -220,7 +232,7 @@ class DatabaseConnector:
                 """, 
                 object_type=object_type, 
                 object_name=object_name,
-                owner=conn.username.upper())
+                owner=schema)
                 
                 result = await cursor.fetchone()
                 if not result:
@@ -239,6 +251,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             
             # Get all constraints for the table
             await cursor.execute("""
@@ -248,7 +261,7 @@ class DatabaseConnector:
                 FROM all_constraints ac
                 WHERE ac.owner = :owner
                 AND ac.table_name = :table_name
-            """, owner=conn.username.upper(), table_name=table_name.upper())
+            """, owner=schema, table_name=table_name.upper())
             
             constraints = await cursor.fetchall()
             result = []
@@ -274,7 +287,7 @@ class DatabaseConnector:
                     WHERE owner = :owner
                     AND constraint_name = :constraint_name
                     ORDER BY position
-                """, owner=conn.username.upper(), constraint_name=constraint_name)
+                """, owner=schema, constraint_name=constraint_name)
                 
                 columns = await cursor.fetchall()
                 constraint_info["columns"] = [col[0] for col in columns]
@@ -294,7 +307,7 @@ class DatabaseConnector:
                         )
                         AND acc.owner = ac.owner
                         ORDER BY acc.position
-                    """, owner=conn.username.upper(), constraint_name=constraint_name)
+                    """, owner=schema, constraint_name=constraint_name)
                     
                     ref_info = await cursor.fetchall()
                     if ref_info:
@@ -318,6 +331,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             
             # Get all indexes for the table
             await cursor.execute("""
@@ -328,7 +342,7 @@ class DatabaseConnector:
                 FROM all_indexes ai
                 WHERE ai.owner = :owner
                 AND ai.table_name = :table_name
-            """, owner=conn.username.upper(), table_name=table_name.upper())
+            """, owner=schema, table_name=table_name.upper())
             
             indexes = await cursor.fetchall()
             result = []
@@ -352,7 +366,7 @@ class DatabaseConnector:
                     WHERE index_owner = :owner
                     AND index_name = :index_name
                     ORDER BY column_position
-                """, owner=conn.username.upper(), index_name=index_name)
+                """, owner=schema, index_name=index_name)
                 
                 columns = await cursor.fetchall()
                 index_info["columns"] = [col[0] for col in columns]
@@ -368,6 +382,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             
             await cursor.execute("""
                 WITH deps AS (
@@ -383,7 +398,7 @@ class DatabaseConnector:
                 JOIN all_objects ao ON deps.name = ao.object_name 
                                    AND deps.type = ao.object_type
                                    AND deps.owner = ao.owner
-            """, object_name=object_name, owner=conn.username.upper())
+            """, object_name=object_name, owner=schema)
             
             dependencies = await cursor.fetchall()
             result = []
@@ -407,9 +422,10 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             
             where_clause = "WHERE owner = :owner"
-            params = {"owner": conn.username.upper()}
+            params = {"owner": schema}
             
             if type_pattern:
                 where_clause += " AND type_name LIKE :type_pattern"
@@ -429,7 +445,7 @@ class DatabaseConnector:
                 type_info = {
                     "name": type_name,
                     "type_category": typecode,
-                    "owner": conn.username.upper()
+                    "owner": schema
                 }
                 
                 # For object types, get attributes
@@ -440,7 +456,7 @@ class DatabaseConnector:
                         WHERE owner = :owner
                         AND type_name = :type_name
                         ORDER BY attr_no
-                    """, owner=conn.username.upper(), type_name=type_name)
+                    """, owner=schema, type_name=type_name)
                     
                     attrs = await cursor.fetchall()
                     if attrs:
@@ -459,7 +475,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
-            table_owner = conn.username.upper()
+            schema = await self._get_effective_schema(conn)
             
             # Get tables referenced by this table
             await cursor.execute("""
@@ -471,7 +487,7 @@ class DatabaseConnector:
                 WHERE ac.constraint_type = 'R'
                 AND ac.table_name = :table_name
                 AND ac.owner = :owner
-            """, table_name=table_name.upper(), owner=table_owner)
+            """, table_name=table_name.upper(), owner=schema)
             
             referenced_tables = [row[0] for row in await cursor.fetchall()]
             
@@ -490,7 +506,7 @@ class DatabaseConnector:
                 JOIN pk_constraints pk ON ac.r_constraint_name = pk.constraint_name
                 WHERE ac.constraint_type = 'R'
                 AND ac.owner = :owner
-            """, table_name=table_name.upper(), owner=table_owner)
+            """, table_name=table_name.upper(), owner=schema)
             
             referencing_tables = [row[0] for row in await cursor.fetchall()]
             
@@ -507,6 +523,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             # Use Oracle's built-in similarity features
             await cursor.execute("""
                 SELECT /*+ RESULT_CACHE */ DISTINCT table_name 
@@ -530,7 +547,7 @@ class DatabaseConnector:
                         UPPER(table_name),
                         :search_term
                     ) DESC
-            """, owner=conn.username.upper(), search_term=search_term.upper())
+            """, owner=schema, search_term=search_term.upper())
             
             results = await cursor.fetchall()
             return [row[0] for row in results][:limit]
@@ -543,6 +560,7 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            schema = await self._get_effective_schema(conn)
             result = {}
             
             # Get columns for the specified tables that match the search term
@@ -557,7 +575,7 @@ class DatabaseConnector:
                 AND table_name IN (SELECT column_value FROM TABLE(CAST(:table_names AS SYS.ODCIVARCHAR2LIST)))
                 AND UPPER(column_name) LIKE '%' || :search_term || '%'
                 ORDER BY table_name, column_id
-            """, owner=conn.username.upper(), 
+            """, owner=schema, 
                 table_names=table_names,
                 search_term=search_term.upper())
             

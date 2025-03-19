@@ -88,9 +88,18 @@ Make sure to restart your terminal after installing uv.
 
 4. Create a `.env` file with your Oracle connection details:
    ```bash
+   # Database connection string (required)
    ORACLE_CONNECTION_STRING=username/password@hostname:port/service_name
-   CACHE_DIR=.cache  # Optional: defaults to .cache
+
+   # Target schema to query (optional)
+   # If not specified, defaults to the connection user's schema
+   TARGET_SCHEMA=some_schema
+
+   # Cache directory (optional, defaults to .cache)
+   CACHE_DIR=.cache
    ```
+
+Note: The connection user must have appropriate permissions to access the target schema.
 
 ## Usage
 
@@ -190,7 +199,7 @@ The database structure has changed. Could you rebuild the schema cache?
 ```
 
 #### `get_database_vendor_info`
-Get information about the connected Oracle database version.
+Get information about the connected Oracle database version and schema.
 Example:
 ```
 What Oracle database version are we running?

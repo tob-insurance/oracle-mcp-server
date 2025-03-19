@@ -13,20 +13,25 @@ from db_context import DatabaseContext
 # Load environment variables from .env file
 load_dotenv()
 
+ORACLE_CONNECTION_STRING = os.getenv('ORACLE_CONNECTION_STRING')
+TARGET_SCHEMA = os.getenv('TARGET_SCHEMA')  # Optional schema override
+CACHE_DIR = os.getenv('CACHE_DIR', '.cache')
+
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[DatabaseContext]:
     """Manage application lifecycle and ensure DatabaseContext is properly initialized"""
     print("App Lifespan initialising", file=sys.stderr)
-    connection_string = os.getenv('ORACLE_CONNECTION_STRING')
+    connection_string = ORACLE_CONNECTION_STRING
     if not connection_string:
         raise ValueError("ORACLE_CONNECTION_STRING environment variable is required. Set it in .env file or environment.")
     
-    cache_dir = Path(os.getenv('CACHE_DIR', '.cache'))
+    cache_dir = Path(CACHE_DIR)
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     db_context = DatabaseContext(
         connection_string=connection_string,
-        cache_path=cache_dir / 'schema_cache.json'
+        cache_path=cache_dir / 'schema_cache.json',
+        target_schema=TARGET_SCHEMA
     )
     
     try:
@@ -212,6 +217,8 @@ async def get_database_vendor_info(ctx: Context) -> str:
         
         result = [f"Database Vendor: {db_info.get('vendor', 'Unknown')}"]
         result.append(f"Version: {db_info.get('version', 'Unknown')}")
+        if "schema" in db_info:
+            result.append(f"Schema: {db_info['schema']}")
         
         if "additional_info" in db_info and db_info["additional_info"]:
             result.append("\nAdditional Version Information:")

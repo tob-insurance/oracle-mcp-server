@@ -1,12 +1,26 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Set, Protocol, Optional, Any
 from pathlib import Path
+from .schema.formatter import format_schema
 
 @dataclass
 class TableInfo:
-    columns: List[Dict[str, str]]
-    relationships: Dict[str, Dict[str, str]]
+    table_name: str
+    columns: List[Dict[str, Any]]
+    relationships: Dict[str, Dict[str, Any]]
     fully_loaded: bool = False
+
+    def format_schema(self) -> str:
+        """Format the schema information for the table, with smart relationship grouping.
+        
+        Returns:
+            A formatted string containing the table's complete schema information.
+        """
+        return format_schema(
+            self.table_name,
+            self.columns,
+            self.relationships
+        )
 
 @dataclass
 class SchemaCache:

@@ -55,7 +55,12 @@ class SchemaManager(SchemaManagerProtocol):
         
         # Initialize empty table info for each table (lazy loading)
         schema_index = {
-            table_name: TableInfo(columns=[], relationships={}, fully_loaded=False)
+            table_name: TableInfo(
+                table_name=table_name,
+                columns=[],
+                relationships={}, 
+                fully_loaded=False
+            )
             for table_name in all_table_names
         }
         
@@ -75,7 +80,7 @@ class SchemaManager(SchemaManagerProtocol):
                     print("Loading index in memory...", file=sys.stderr)
                     # Load main schema cache
                     cache = SchemaCache(
-                        tables={k: TableInfo(**v) for k, v in data['tables'].items()},
+                        tables={k: TableInfo(**{**v, 'table_name': k}) for k, v in data['tables'].items()},
                         last_updated=data['last_updated'],
                         all_table_names=set(data.get('all_table_names', []))
                     )
@@ -136,7 +141,11 @@ class SchemaManager(SchemaManagerProtocol):
             
         # Check if we have the table in our cache
         if table_name not in self.cache.tables:
-            self.cache.tables[table_name] = TableInfo(columns=[], relationships={}, fully_loaded=False)
+            self.cache.tables[table_name] = TableInfo(
+                columns=[], 
+                relationships={}, 
+                fully_loaded=False
+            )
             
         # If the table isn't fully loaded, load it now
         if not self.cache.tables[table_name].fully_loaded:
@@ -144,6 +153,7 @@ class SchemaManager(SchemaManagerProtocol):
             table_details = await self.db_connector.load_table_details(table_name)
             if table_details:
                 table_info = TableInfo(
+                    table_name=table_name,
                     columns=table_details["columns"],
                     relationships=table_details["relationships"],
                     fully_loaded=True

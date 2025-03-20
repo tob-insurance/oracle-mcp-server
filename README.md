@@ -86,21 +86,6 @@ Make sure to restart your terminal after installing uv.
    uv pip install -e .
    ```
 
-4. Create a `.env` file with your Oracle connection details:
-   ```bash
-   # Database connection string (required)
-   ORACLE_CONNECTION_STRING=username/password@hostname:port/service_name
-
-   # Target schema to query (optional)
-   # If not specified, defaults to the connection user's schema
-   TARGET_SCHEMA=some_schema
-
-   # Cache directory (optional, defaults to .cache)
-   CACHE_DIR=.cache
-   ```
-
-Note: The connection user must have appropriate permissions to access the target schema.
-
 ## Usage
 
 ### Integration with GitHub Copilot in VSCode Insiders
@@ -130,12 +115,19 @@ To use this MCP server with GitHub Copilot in VSCode Insiders, follow these step
                    "run",
                    "main.py"
                ],
-               "env": {}
+               "env": {
+                  "ORACLE_CONNECTION_STRING":"user/pass@localhost:1521/mydb",
+                  "TARGET_SCHEMA":"",
+                  "CACHE_DIR":".cache",
+               }
            }
        }
    }
    ```
-   Replace the paths with your actual uv binary path and mcp-db-context directory path.
+   - Replace the paths with your actual uv binary path and mcp-db-context directory path.
+   - Replace the environment variables with your `ORACLE_CONNECTION_STRING`. 
+   - Note: The `CACHE_DIR` is optional, it will default to `.cache` within the MCP server root folder. 
+   - Note: The `TARGET_SCHEMA` is optional, it will default to the user's schema. The connection user must have appropriate permissions to access the target schema if it differs from the default.
 
 4. **Enable Agent Mode**
    - Open Copilot chat in VSCode Insiders

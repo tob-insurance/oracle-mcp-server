@@ -248,7 +248,7 @@ class DatabaseConnector:
                 
                 return "\n".join(line[0] for line in source_lines)
             else:
-                # For procedures, functions, triggers, etc.
+                # For procedures, functions, triggers, views, etc.
                 await cursor.execute("""
                     SELECT dbms_metadata.get_ddl(
                         :object_type, 
@@ -261,10 +261,12 @@ class DatabaseConnector:
                 owner=schema)
                 
                 result = await cursor.fetchone()
-                if not result:
+                if not result or not result[0]:
                     return ""
                     
-                return result[0].read()
+                # Properly await the CLOB read operation
+                clob = result[0]
+                return await clob.read()
                 
         except oracledb.Error as e:
             print(f"Error getting object source: {str(e)}", file=sys.stderr)

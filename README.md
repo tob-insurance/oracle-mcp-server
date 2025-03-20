@@ -39,53 +39,6 @@ By intelligently caching and serving database schema information, this server al
 - **Oracle Database Support**: Built specifically for Oracle databases
 - **MCP Integration**: Works seamlessly with GitHub Copilot in VSCode, Claude, ChatGPT, and other AI assistants that support MCP
 
-## Installation
-
-### Prerequisites
-
-- Python 3.12 or higher
-- uv package manager (recommended over pip)
-- Oracle database access
-- Oracle instant client (required for the `oracledb` Python package)
-
-### Installing uv
-
-```bash
-# Install uv using curl (macOS/Linux)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Or using PowerShell (Windows)
-irm https://astral.sh/uv/install.ps1 | iex
-```
-
-Make sure to restart your terminal after installing uv.
-
-### Project Setup
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/mcp-db-context.git
-   cd mcp-db-context
-   ```
-
-2. Create and activate a virtual environment using uv:
-   ```bash
-   # Create virtual environment
-   uv venv
-   
-   # Activate (On Unix/macOS)
-   source .venv/bin/activate
-   
-   # Activate (On Windows)
-   .venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```bash
-   # Install in development mode
-   uv pip install -e .
-   ```
-
 ## Usage
 
 ### Integration with GitHub Copilot in VSCode Insiders
@@ -101,19 +54,35 @@ To use this MCP server with GitHub Copilot in VSCode Insiders, follow these step
    - Search for and install "GitHub Copilot"
 
 3. **Configure MCP Server**
-   - Open your VSCode Insiders settings.json file (User or Workspace)
-   - Add the following configuration:
+   - **Recommended: [Using Docker](#option-1-using-docker-recommended)**
+   - Alternative: [Using UV](#option-2-using-uv-local-installation)
+
+4. **Enable Agent Mode**
+   - Open Copilot chat in VSCode Insiders
+   - Click on "Copilot Edits"
+   - Choose "Agent mode"
+   - Click the refresh button in the chat input to load the available tools
+
+After completing these steps, you'll have access to all database context tools through GitHub Copilot's chat interface.
+
+#### Option 1: Using Docker (Recommended)
    ```json
    "mcp": {
        "inputs": [],
        "servers": {
            "db-context": {
-               "command": "/path/to/your/.local/bin/uv",
+               "command": "docker",
                "args": [
-                   "--directory",
-                   "/path/to/your/mcp-db-context",
                    "run",
-                   "main.py"
+                   "-i",
+                   "--rm",
+                   "-e",
+                   "ORACLE_CONNECTION_STRING",
+                   "-e",
+                   "TARGET_SCHEMA",
+                   "-e",
+                   "CACHE_DIR",
+                   "dmeppiel/mcp-db-context"
                ],
                "env": {
                   "ORACLE_CONNECTION_STRING":"user/pass@localhost:1521/mydb",
@@ -124,18 +93,73 @@ To use this MCP server with GitHub Copilot in VSCode Insiders, follow these step
        }
    }
    ```
-   - Replace the paths with your actual uv binary path and mcp-db-context directory path.
-   - Replace the environment variables with your `ORACLE_CONNECTION_STRING`. 
-   - Note: The `CACHE_DIR` is optional, it will default to `.cache` within the MCP server root folder. 
-   - Note: The `TARGET_SCHEMA` is optional, it will default to the user's schema. The connection user must have appropriate permissions to access the target schema if it differs from the default.
 
-4. **Enable Agent Mode**
-   - Open Copilot chat in VSCode Insiders
-   - Click on "Copilot Edits"
-   - Choose "Agent mode"
-   - Click the refresh button in the chat input to load the available tools
+#### Option 2: Using UV (Local Installation)
+   
+   This option requires installing and setting up the project locally:
 
-After completing these steps, you'll have access to all database context tools through GitHub Copilot's chat interface.
+   1. **Prerequisites**
+      - Python 3.12 or higher
+      - Oracle database access
+      - Oracle instant client (required for the `oracledb` Python package)
+
+   2. **Install UV**
+      ```bash
+      # Install uv using curl (macOS/Linux)
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      # Or using PowerShell (Windows)
+      irm https://astral.sh/uv/install.ps1 | iex
+      ```
+      Make sure to restart your terminal after installing uv.
+
+   3. **Project Setup**
+      ```bash
+      # Clone repository
+      git clone https://github.com/yourusername/mcp-db-context.git
+      cd mcp-db-context
+
+      # Create and activate virtual environment
+      uv venv
+      
+      # Activate (On Unix/macOS)
+      source .venv/bin/activate
+      
+      # Activate (On Windows)
+      .venv\Scripts\activate
+
+      # Install dependencies
+      uv pip install -e .
+      ```
+
+   4. **Configure VSCode Settings**
+      ```json
+      "mcp": {
+         "inputs": [],
+         "servers": {
+            "db-context": {
+                  "command": "/path/to/your/.local/bin/uv",
+                  "args": [
+                     "--directory",
+                     "/path/to/your/mcp-db-context",
+                     "run",
+                     "main.py"
+                  ],
+                  "env": {
+                     "ORACLE_CONNECTION_STRING":"user/pass@localhost:1521/mydb",
+                     "TARGET_SCHEMA":"",
+                     "CACHE_DIR":".cache",
+                  }
+            }
+         }
+      }
+      ```
+   - Replace the paths with your actual uv binary path and mcp-db-context directory path
+
+For both options:
+- Replace the `ORACLE_CONNECTION_STRING` with your actual database connection string
+- The `TARGET_SCHEMA` is optional, it will default to the user's schema
+- The `CACHE_DIR` is optional, defaulting to `.cache` within the MCP server root folder
 
 ### Starting the Server locally
 

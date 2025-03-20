@@ -174,12 +174,19 @@ async def search_tables_schema(search_term: str, ctx: Context) -> str:
         matching_tables.update(tables)
     
     # Convert back to list and limit to 20 results
-    matching_tables = list(matching_tables)[:20]
+    matching_tables = list(matching_tables)
+    total_matches = len(matching_tables)
+    limited_tables = matching_tables[:20]
     
     if not matching_tables:
         return f"No tables found matching any of these terms: {', '.join(search_terms)}"
     
-    results = [f"Found {len(matching_tables)} tables matching terms ({', '.join(search_terms)}):"]
+    if total_matches > 20:
+        results = [f"Found {total_matches} tables matching terms ({', '.join(search_terms)}). Returning the first 20 for performance reasons:"]
+    else:
+        results = [f"Found {total_matches} tables matching terms ({', '.join(search_terms)}):"]
+    
+    matching_tables = limited_tables
     
     # Now load the schema for each matching table
     for table_name in matching_tables:

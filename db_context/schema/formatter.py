@@ -147,11 +147,37 @@ def format_relationships(relationships: Dict[str, Dict[str, Any]]) -> List[str]:
     # Split relationships by direction
     incoming = []
     outgoing = []
+    
     for ref_table, rel in relationships.items():
-        if rel['direction'] == 'INCOMING':
-            incoming.append((ref_table, rel))
+        # Handle case where rel is a list of relationships rather than a single relationship
+        if isinstance(rel, list):
+            for single_rel in rel:
+                if 'direction' not in single_rel:
+                    continue  # Skip if no direction
+                
+                # Use safe attribute access
+                direction = single_rel.get('direction', '')
+                local_column = single_rel.get('local_column', '')
+                foreign_column = single_rel.get('foreign_column', '')
+                
+                if direction == 'INCOMING':
+                    incoming.append((ref_table, {'direction': direction, 'local_column': local_column, 'foreign_column': foreign_column}))
+                else:
+                    outgoing.append((ref_table, {'direction': direction, 'local_column': local_column, 'foreign_column': foreign_column}))
         else:
-            outgoing.append((ref_table, rel))
+            # Handle dict format
+            if 'direction' not in rel:
+                continue  # Skip if no direction
+                
+            # Use safe attribute access
+            direction = rel.get('direction', '')
+            local_column = rel.get('local_column', '')
+            foreign_column = rel.get('foreign_column', '')
+            
+            if direction == 'INCOMING':
+                incoming.append((ref_table, {'direction': direction, 'local_column': local_column, 'foreign_column': foreign_column}))
+            else:
+                outgoing.append((ref_table, {'direction': direction, 'local_column': local_column, 'foreign_column': foreign_column}))
     
     # Format outgoing relationships
     if outgoing:

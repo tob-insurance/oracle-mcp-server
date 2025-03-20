@@ -1,12 +1,18 @@
 name: Docker Build
 
 permissions:
-  contents: read
-
+    contents: read
+  
 on:
   push:
     branches:
       - '**'
+  pull_request:
+    branches:
+      - 'main'
+      - 'releases/**'
+      - 'release/**'
+      - 'develop'
 
 jobs:
   verify:

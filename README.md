@@ -12,6 +12,9 @@ A powerful Model Context Protocol (MCP) server that provides contextual database
    - [Starting the Server locally](#starting-the-server-locally)
    - [Available Tools](#available-tools)
 - [Architecture](#architecture)
+- [Connection Modes](#connection-modes)
+   - [Thin Mode (Default)](#thin-mode-default)
+   - [Thick Mode](#thick-mode)
 - [System Requirements](#system-requirements)
 - [Performance Considerations](#performance-considerations)
 - [Contributing](#contributing)
@@ -64,9 +67,19 @@ To use this MCP server with GitHub Copilot in VSCode Insiders, follow these step
 After completing these steps, you'll have access to all database context tools through GitHub Copilot's chat interface.
 
 #### Option 1: Using Docker (Recommended)
+
+In VSCode Insiders, go to your user or workspace `settings.json` file and add the following:
+
    ```json
    "mcp": {
-       "inputs": [],
+       "inputs": [
+        {
+          "id": "db-password",
+          "type": "promptString",
+          "description": "Oracle DB Password",
+          "password": true,
+        }
+      ],
        "servers": {
            "db-context": {
                "command": "docker",
@@ -80,17 +93,24 @@ After completing these steps, you'll have access to all database context tools t
                    "TARGET_SCHEMA",
                    "-e",
                    "CACHE_DIR",
+                   "-e",
+                   "THICK_MODE",
                    "dmeppiel/mcp-db-context"
                ],
                "env": {
-                  "ORACLE_CONNECTION_STRING":"user/pass@localhost:1521/mydb",
+                  "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
                   "TARGET_SCHEMA":"",
                   "CACHE_DIR":".cache",
+                  "THICK_MODE":""  // Optional: set to "1" to enable thick mode
                }
            }
        }
    }
    ```
+
+   When using Docker (recommended approach):
+   - All dependencies are included in the container
+   - Set `THICK_MODE=1` in the environment variables to enable thick mode if needed
 
 #### Option 2: Using UV (Local Installation)
    
@@ -133,7 +153,14 @@ After completing these steps, you'll have access to all database context tools t
    4. **Configure VSCode Settings**
       ```json
       "mcp": {
-         "inputs": [],
+         "inputs": [
+            {
+               "id": "db-password",
+               "type": "promptString",
+               "description": "Oracle DB Password",
+               "password": true,
+            }
+         ],
          "servers": {
             "db-context": {
                   "command": "/path/to/your/.local/bin/uv",
@@ -144,9 +171,10 @@ After completing these steps, you'll have access to all database context tools t
                      "main.py"
                   ],
                   "env": {
-                     "ORACLE_CONNECTION_STRING":"user/pass@localhost:1521/mydb",
+                     "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
                      "TARGET_SCHEMA":"",
                      "CACHE_DIR":".cache",
+                     "THICK_MODE":""  // Optional: set to "1" to enable thick mode
                   }
             }
          }
@@ -293,6 +321,23 @@ This MCP server employs a three-layer architecture optimized for large-scale Ora
    - Exposes high-level MCP tools and interfaces
    - Handles authorization and access control
    - Provides schema optimization for AI consumption
+
+## Connection Modes
+
+The database connector supports two connection modes:
+
+### Thin Mode (Default)
+By default, the connector uses Oracle's thin mode, which is a pure Python implementation. This mode is:
+- Easier to set up and deploy
+- Sufficient for most basic database operations
+- More portable across different environments
+
+### Thick Mode
+For scenarios requiring advanced Oracle features or better performance, you can enable thick mode:
+- When using Docker (recommended): Set `THICK_MODE=1` in the Docker environment variables
+- When using local installation: Export `THICK_MODE=1` environment variable and ensure Oracle Client libraries, compatible with your system architecture and database version, are installed
+
+Note: When using Docker, you don't need to worry about installing Oracle Client libraries as they are included in the container (Oracle Instant Client v23.7). The container supports Oracle databases versions 19c up to 23ai in both linux/arm64 and linux/amd64 architectures. 
 
 ## System Requirements
 

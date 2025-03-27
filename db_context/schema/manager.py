@@ -36,14 +36,9 @@ class SchemaManager(SchemaManagerProtocol):
 
     async def _initialize_cache_path(self) -> None:
         """Initialize the cache file path using the schema name"""
-        # Get the schema name from the database connector
-        conn = await self.db_connector.get_connection()
-        try:
-            schema_name = await self.db_connector._get_effective_schema(conn)
-            # Create schema-specific cache file name
-            self.cache_path = self.cache_base_path.parent / f"{schema_name.lower()}.json"
-        finally:
-            await conn.close()
+        schema_name = await self.db_connector.get_effective_schema()
+        # Create schema-specific cache file name
+        self.cache_path = self.cache_base_path.parent / f"{schema_name.lower()}.json"
 
     async def build_schema_index(self) -> Dict[str, TableInfo]:
         """

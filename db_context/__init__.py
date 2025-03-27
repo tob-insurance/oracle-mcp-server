@@ -7,8 +7,8 @@ from .models import TableInfo
 
 
 class DatabaseContext:
-    def __init__(self, connection_string: str, cache_path: Path, target_schema: Optional[str] = None):
-        self.db_connector = DatabaseConnector(connection_string, target_schema)
+    def __init__(self, connection_string: str, cache_path: Path, target_schema: Optional[str] = None,  use_thick_mode: bool = False):
+        self.db_connector = DatabaseConnector(connection_string, target_schema, use_thick_mode)
         self.schema_manager = SchemaManager(self.db_connector, cache_path)
         # Set the schema manager reference in the connector
         self.db_connector.set_schema_manager(self.schema_manager)

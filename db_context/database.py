@@ -6,11 +6,21 @@ from pathlib import Path
 from .models import SchemaManager
 
 class DatabaseConnector:
-    def __init__(self, connection_string: str, target_schema: Optional[str] = None):
+    def __init__(self, connection_string: str, target_schema: Optional[str] = None, use_thick_mode: bool = False):
         self.connection_string = connection_string
         self.schema_manager: Optional[SchemaManager] = None  # Will be set by DatabaseContext
         self.target_schema: Optional[str] = target_schema
+        self.thick_mode = use_thick_mode
         
+        if self.thick_mode:
+            try:
+                oracledb.init_oracle_client()
+                print("Oracle Client initialized in thick mode", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Could not initialize Oracle Client: {e}", file=sys.stderr)
+                print("Falling back to thin mode", file=sys.stderr)
+                self.thick_mode = False
+
     def set_schema_manager(self, schema_manager: SchemaManager) -> None:
         """Set the schema manager reference"""
         self.schema_manager = schema_manager
@@ -19,13 +29,44 @@ class DatabaseConnector:
         """Create and return a database connection"""
         try:
             print(f"Connecting to database with connection string: {self.connection_string}", file=sys.stderr)
-            return await oracledb.connect_async(self.connection_string)
+            if self.thick_mode:
+                # Use regular connect for thick mode
+                return oracledb.connect(self.connection_string)
+            else:
+                # Use connect_async for thin mode
+                return await oracledb.connect_async(self.connection_string)
         except oracledb.Error as e:
             print(f"Database connection error: {str(e)}", file=sys.stderr)
-            raise  # Re-raise the exception after logging
+            if "DPY-3015" in str(e) and not self.thick_mode:
+                print("Consider using thick mode by setting THICK_MODE=True", file=sys.stderr)
+            raise
         except Exception as e:
             print(f"Unexpected error while connecting to database: {str(e)}", file=sys.stderr)
             raise
+
+    async def _execute_cursor(self, cursor, sql: str, **params):
+        """Helper method to execute cursor operations based on mode"""
+        if self.thick_mode:
+            cursor.execute(sql, **params)  # Synchronous execution
+            return cursor.fetchall()
+        else:
+            await cursor.execute(sql, **params)  # Async execution
+            return await cursor.fetchall()
+
+    async def _execute_cursor_no_fetch(self, cursor, sql: str, **params):
+        """Helper method for cursor operations that don't need fetching (e.g. DELETE, UPDATE)"""
+        if self.thick_mode:
+            cursor.execute(sql, **params)
+        else:
+            await cursor.execute(sql, **params)
+
+    async def _commit(self, conn):
+        """Commit the current transaction"""
+        if self.thick_mode:
+            conn.commit()
+        else:         
+            await conn.commit()
+
 
     async def _get_effective_schema(self, conn) -> str:
         """Get the effective schema to use (either target_schema or connection user)"""
@@ -33,14 +74,21 @@ class DatabaseConnector:
             return self.target_schema.upper()
         return conn.username.upper()
 
+    async def get_effective_schema(self) -> str:
+        """Get the effective schema name (either target_schema or connection user)"""
+        conn = await self.get_connection()
+        try:
+            return await self._get_effective_schema(conn)
+        finally:
+            await self._close_connection(conn)
+
     async def get_database_info(self) -> Dict[str, Any]:
         """Get information about the database vendor and version"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
             # Query for database version information
-            await cursor.execute("SELECT * FROM v$version")
-            version_info = await cursor.fetchall()
+            version_info = await self._execute_cursor(cursor, "SELECT * FROM v$version")
             
             # Extract vendor type and full version string
             vendor_info = {}
@@ -62,7 +110,7 @@ class DatabaseConnector:
             print(f"Error getting database info: {str(e)}", file=sys.stderr)
             return {"vendor": "Oracle", "version": "Unknown", "error": str(e)}
         finally:
-            await conn.close()
+            await self._close_connection(conn)
 
     async def get_all_table_names(self) -> Set[str]:
         """Get a list of all table names in the database using optimized query"""
@@ -72,17 +120,20 @@ class DatabaseConnector:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
             # Using RESULT_CACHE hint for frequently accessed data
-            await cursor.execute("""
+            all_tables = await self._execute_cursor(
+                cursor,
+                """
                 SELECT /*+ RESULT_CACHE */ table_name 
                 FROM all_tables 
                 WHERE owner = :owner
                 ORDER BY table_name
-            """, owner=schema)
+                """,
+                owner=schema
+            )
             
-            all_tables = await cursor.fetchall()
             return {t[0] for t in all_tables}
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def load_table_details(self, table_name: str) -> Optional[Dict[str, Any]]:
         """Load detailed schema information for a specific table with optimized queries"""
@@ -90,27 +141,36 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
+            
             # Check if the table exists using result cache
-            await cursor.execute("""
+            table_exists = await self._execute_cursor(
+                cursor,
+                """
                 SELECT /*+ RESULT_CACHE */ COUNT(*) 
                 FROM all_tables 
                 WHERE owner = :owner AND table_name = :table_name
-            """, owner=schema, table_name=table_name.upper())
+                """,
+                owner=schema, 
+                table_name=table_name.upper()
+            )
             
-            count = await cursor.fetchone()
-            if count[0] == 0:
+            if table_exists[0][0] == 0:
                 return None
                 
             # Get column information using result cache and index hints
-            await cursor.execute("""
+            columns = await self._execute_cursor(
+                cursor,
+                """
                 SELECT /*+ RESULT_CACHE INDEX(atc) */ 
                     column_name, data_type, nullable
                 FROM all_tab_columns atc
                 WHERE owner = :owner AND table_name = :table_name
                 ORDER BY column_id
-            """, owner=schema, table_name=table_name.upper())
+                """,
+                owner=schema, 
+                table_name=table_name.upper()
+            )
             
-            columns = await cursor.fetchall()
             column_info = []
             for column, data_type, nullable in columns:
                 column_info.append({
@@ -120,7 +180,9 @@ class DatabaseConnector:
                 })
             
             # Get relationship information using optimized join order and result cache
-            await cursor.execute("""
+            relationships = await self._execute_cursor(
+                cursor,
+                """
                 SELECT /*+ RESULT_CACHE */
                     'OUTGOING' AS relationship_direction,
                     acc.column_name AS source_column,
@@ -156,9 +218,11 @@ class DatabaseConnector:
                     AND table_name = :table_name
                     AND constraint_type IN ('P', 'U')
                 )
-            """, owner=schema, table_name=table_name.upper())
+                """,
+                owner=schema, 
+                table_name=table_name.upper()
+            )
             
-            relationships = await cursor.fetchall()
             relationship_info = {}
             for direction, column, ref_table, ref_column in relationships:
                 if ref_table not in relationship_info:
@@ -178,7 +242,7 @@ class DatabaseConnector:
             print(f"Error loading table details for {table_name}: {str(e)}", file=sys.stderr)
             raise
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_pl_sql_objects(self, object_type: str, name_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get PL/SQL objects"""
@@ -194,14 +258,13 @@ class DatabaseConnector:
                 where_clause += " AND object_name LIKE :name_pattern"
                 params["name_pattern"] = name_pattern.upper()
             
-            await cursor.execute(f"""
+            objects = await self._execute_cursor(cursor, f"""
                 SELECT object_name, object_type, status, created, last_ddl_time
                 FROM all_objects
                 {where_clause}
                 ORDER BY object_name
             """, **params)
             
-            objects = await cursor.fetchall()
             result = []
             
             for name, obj_type, status, created, last_modified in objects:
@@ -221,7 +284,7 @@ class DatabaseConnector:
             
             return result
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_object_source(self, object_type: str, object_name: str) -> str:
         """Get the source code for a PL/SQL object"""
@@ -233,7 +296,7 @@ class DatabaseConnector:
             # Handle different object types accordingly
             if object_type in ('PACKAGE', 'PACKAGE BODY', 'TYPE', 'TYPE BODY'):
                 # For packages and types, we need to get the full source
-                await cursor.execute("""
+                source_lines = await self._execute_cursor(cursor, """
                     SELECT text
                     FROM all_source
                     WHERE owner = :owner 
@@ -242,14 +305,13 @@ class DatabaseConnector:
                     ORDER BY line
                 """, owner=schema, name=object_name, type=object_type)
                 
-                source_lines = await cursor.fetchall()
                 if not source_lines:
                     return ""
                 
                 return "\n".join(line[0] for line in source_lines)
             else:
                 # For procedures, functions, triggers, views, etc.
-                await cursor.execute("""
+                result = await self._execute_cursor(cursor, """
                     SELECT dbms_metadata.get_ddl(
                         :object_type, 
                         :object_name, 
@@ -260,19 +322,18 @@ class DatabaseConnector:
                 object_name=object_name,
                 owner=schema)
                 
-                result = await cursor.fetchone()
                 if not result or not result[0]:
                     return ""
                     
                 # Properly await the CLOB read operation
-                clob = result[0]
+                clob = result[0][0]
                 return await clob.read()
                 
         except oracledb.Error as e:
             print(f"Error getting object source: {str(e)}", file=sys.stderr)
             return f"Error retrieving source: {str(e)}"
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_table_constraints(self, table_name: str) -> List[Dict[str, Any]]:
         """Get table constraints"""
@@ -282,7 +343,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Get all constraints for the table
-            await cursor.execute("""
+            constraints = await self._execute_cursor(cursor, """
                 SELECT ac.constraint_name,
                        ac.constraint_type,
                        ac.search_condition
@@ -291,7 +352,6 @@ class DatabaseConnector:
                 AND ac.table_name = :table_name
             """, owner=schema, table_name=table_name.upper())
             
-            constraints = await cursor.fetchall()
             result = []
             
             for constraint_name, constraint_type, condition in constraints:
@@ -309,7 +369,7 @@ class DatabaseConnector:
                 }
                 
                 # Get columns involved in this constraint
-                await cursor.execute("""
+                columns = await self._execute_cursor(cursor, """
                     SELECT column_name
                     FROM all_cons_columns
                     WHERE owner = :owner
@@ -317,12 +377,11 @@ class DatabaseConnector:
                     ORDER BY position
                 """, owner=schema, constraint_name=constraint_name)
                 
-                columns = await cursor.fetchall()
                 constraint_info["columns"] = [col[0] for col in columns]
                 
                 # If it's a foreign key, get the referenced table/columns
                 if constraint_type == 'R':
-                    await cursor.execute("""
+                    ref_info = await self._execute_cursor(cursor, """
                         SELECT ac.table_name,
                                acc.column_name
                         FROM all_constraints ac
@@ -337,7 +396,6 @@ class DatabaseConnector:
                         ORDER BY acc.position
                     """, owner=schema, constraint_name=constraint_name)
                     
-                    ref_info = await cursor.fetchall()
                     if ref_info:
                         constraint_info["references"] = {
                             "table": ref_info[0][0],
@@ -352,7 +410,7 @@ class DatabaseConnector:
             
             return result
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_table_indexes(self, table_name: str) -> List[Dict[str, Any]]:
         """Get table indexes"""
@@ -362,7 +420,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Get all indexes for the table
-            await cursor.execute("""
+            indexes = await self._execute_cursor(cursor, """
                 SELECT ai.index_name,
                        ai.uniqueness,
                        ai.tablespace_name,
@@ -372,7 +430,6 @@ class DatabaseConnector:
                 AND ai.table_name = :table_name
             """, owner=schema, table_name=table_name.upper())
             
-            indexes = await cursor.fetchall()
             result = []
             
             for index_name, uniqueness, tablespace, status in indexes:
@@ -388,7 +445,7 @@ class DatabaseConnector:
                     index_info["status"] = status
                 
                 # Get columns in this index
-                await cursor.execute("""
+                columns = await self._execute_cursor(cursor, """
                     SELECT column_name
                     FROM all_ind_columns
                     WHERE index_owner = :owner
@@ -396,14 +453,13 @@ class DatabaseConnector:
                     ORDER BY column_position
                 """, owner=schema, index_name=index_name)
                 
-                columns = await cursor.fetchall()
                 index_info["columns"] = [col[0] for col in columns]
                 
                 result.append(index_info)
             
             return result
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_dependent_objects(self, object_name: str) -> List[Dict[str, Any]]:
         """Get objects that depend on the specified object"""
@@ -412,7 +468,7 @@ class DatabaseConnector:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
             
-            await cursor.execute("""
+            dependencies = await self._execute_cursor(cursor, """
                 WITH deps AS (
                     SELECT /*+ MATERIALIZE */
                            name, type, owner
@@ -428,7 +484,6 @@ class DatabaseConnector:
                                    AND deps.owner = ao.owner
             """, object_name=object_name, owner=schema)
             
-            dependencies = await cursor.fetchall()
             result = []
             
             for name, obj_type, owner in dependencies:
@@ -443,7 +498,7 @@ class DatabaseConnector:
             print(f"Error getting dependent objects: {str(e)}", file=sys.stderr)
             raise
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_user_defined_types(self, type_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get user-defined types"""
@@ -459,14 +514,13 @@ class DatabaseConnector:
                 where_clause += " AND type_name LIKE :type_pattern"
                 params["type_pattern"] = type_pattern.upper()
             
-            await cursor.execute(f"""
+            types = await self._execute_cursor(cursor, f"""
                 SELECT type_name, typecode
                 FROM all_types
                 {where_clause}
                 ORDER BY type_name
             """, **params)
             
-            types = await cursor.fetchall()
             result = []
             
             for type_name, typecode in types:
@@ -478,7 +532,7 @@ class DatabaseConnector:
                 
                 # For object types, get attributes
                 if (typecode == 'OBJECT'):
-                    await cursor.execute("""
+                    attrs = await self._execute_cursor(cursor, """
                         SELECT attr_name, attr_type_name
                         FROM all_type_attrs
                         WHERE owner = :owner
@@ -486,7 +540,6 @@ class DatabaseConnector:
                         ORDER BY attr_no
                     """, owner=schema, type_name=type_name)
                     
-                    attrs = await cursor.fetchall()
                     if attrs:
                         type_info["attributes"] = [
                             {"name": attr[0], "type": attr[1]} for attr in attrs
@@ -496,7 +549,7 @@ class DatabaseConnector:
             
             return result
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def get_related_tables(self, table_name: str) -> Dict[str, List[str]]:
         """Get all tables that are related to the specified table through foreign keys."""
@@ -506,7 +559,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Get tables referenced by this table
-            await cursor.execute("""
+            referenced_tables_result = await self._execute_cursor(cursor, """
                 SELECT /*+ RESULT_CACHE LEADING(ac acc) USE_NL(acc) */
                     DISTINCT acc.table_name AS referenced_table
                 FROM all_constraints ac
@@ -517,10 +570,10 @@ class DatabaseConnector:
                 AND ac.owner = :owner
             """, table_name=table_name.upper(), owner=schema)
             
-            referenced_tables = [row[0] for row in await cursor.fetchall()]
+            referenced_tables = [row[0] for row in referenced_tables_result]
             
             # Get tables that reference this table
-            await cursor.execute("""
+            referencing_tables_result = await self._execute_cursor(cursor, """
                 WITH pk_constraints AS (
                     SELECT /*+ MATERIALIZE */ constraint_name
                     FROM all_constraints
@@ -530,13 +583,13 @@ class DatabaseConnector:
                 )
                 SELECT /*+ RESULT_CACHE LEADING(ac pk) USE_NL(pk) */
                     DISTINCT ac.table_name AS referencing_table
-                FROM all_constraints ac
+                FROM pk_constraints
                 JOIN pk_constraints pk ON ac.r_constraint_name = pk.constraint_name
                 WHERE ac.constraint_type = 'R'
                 AND ac.owner = :owner
             """, table_name=table_name.upper(), owner=schema)
             
-            referencing_tables = [row[0] for row in await cursor.fetchall()]
+            referencing_tables = [row[0] for row in referencing_tables_result]
             
             return {
                 'referenced_tables': referenced_tables,
@@ -544,7 +597,7 @@ class DatabaseConnector:
             }
             
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def search_in_database(self, search_term: str, limit: int = 20) -> List[str]:
         """Search for table names in the database using similarity matching"""
@@ -553,7 +606,7 @@ class DatabaseConnector:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
             # Use Oracle's built-in similarity features
-            await cursor.execute("""
+            results = await self._execute_cursor(cursor, """
                 SELECT /*+ RESULT_CACHE */ DISTINCT table_name 
                 FROM all_tables 
                 WHERE owner = :owner
@@ -577,11 +630,10 @@ class DatabaseConnector:
                     ) DESC
             """, owner=schema, search_term=search_term.upper())
             
-            results = await cursor.fetchall()
             return [row[0] for row in results][:limit]
             
         finally:
-            await conn.close()
+            await self._close_connection(conn)
             
     async def search_columns_in_database(self, table_names: List[str], search_term: str) -> Dict[str, List[Dict[str, Any]]]:
         """Search for columns in specified tables"""
@@ -592,7 +644,7 @@ class DatabaseConnector:
             result = {}
             
             # Get columns for the specified tables that match the search term
-            await cursor.execute("""
+            rows = await self._execute_cursor(cursor, """
                 SELECT /*+ RESULT_CACHE */ 
                     table_name,
                     column_name,
@@ -607,8 +659,6 @@ class DatabaseConnector:
                 table_names=table_names,
                 search_term=search_term.upper())
             
-            rows = await cursor.fetchall()
-            
             for table_name, column_name, data_type, nullable in rows:
                 if table_name not in result:
                     result[table_name] = []
@@ -621,7 +671,7 @@ class DatabaseConnector:
             return result
             
         finally:
-            await conn.close()
+            await self._close_connection(conn)
     
     async def explain_query_plan(self, query: str) -> Dict[str, Any]:
         """Get execution plan for a SQL query"""
@@ -634,7 +684,7 @@ class DatabaseConnector:
             await cursor.execute(plan_statement)
             
             # Then retrieve the execution plan with cost and cardinality information
-            await cursor.execute("""
+            plan_rows = await self._execute_cursor(cursor, """
                 SELECT 
                     LPAD(' ', 2*LEVEL-2) || operation || ' ' || 
                     options || ' ' || object_name || 
@@ -652,11 +702,9 @@ class DatabaseConnector:
                 ORDER SIBLINGS BY position
             """)
             
-            plan_rows = await cursor.fetchall()
-            
             # Clear the plan table for next time
-            await cursor.execute("DELETE FROM plan_table")
-            await conn.commit()
+            await self._execute_cursor_no_fetch(cursor,"DELETE FROM plan_table")
+            await self._commit(conn)
             
             # Also get some basic optimization hints based on query content
             basic_analysis = self._analyze_query_for_optimization(query)
@@ -673,7 +721,7 @@ class DatabaseConnector:
                 "error": str(e)
             }
         finally:
-            await conn.close()
+            await self._close_connection(conn)
             
     def _analyze_query_for_optimization(self, query: str) -> List[str]:
         """Simple heuristic analysis of query for basic optimization suggestions"""
@@ -712,3 +760,13 @@ class DatabaseConnector:
             suggestions.append(f"Query joins {table_count} tables - consider reviewing join order and conditions")
             
         return suggestions
+
+    async def _close_connection(self, conn):
+        """Helper method to close connection based on mode"""
+        try:
+            if self.thick_mode:
+                conn.close()  # Synchronous close for thick mode
+            else:
+                await conn.close()  # Async close for thin mode
+        except Exception as e:
+            print(f"Error closing connection: {str(e)}", file=sys.stderr)

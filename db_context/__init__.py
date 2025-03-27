@@ -14,8 +14,13 @@ class DatabaseContext:
         self.db_connector.set_schema_manager(self.schema_manager)
         
     async def initialize(self) -> None:
-        """Initialize the database context and build initial cache"""
+        """Initialize the database context, connection pool, and schema cache"""
+        await self.db_connector.initialize_pool()
         await self.schema_manager.initialize()
+        
+    async def close(self) -> None:
+        """Close the database context and connection pool"""
+        await self.db_connector.close_pool()
         
     async def get_database_info(self):
         """Get information about the database vendor and version"""

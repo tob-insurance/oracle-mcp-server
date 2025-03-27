@@ -1,6 +1,7 @@
 import sys
 import oracledb
 import time
+import asyncio
 from typing import Dict, List, Set, Optional, Any
 from pathlib import Path
 from .models import SchemaManager
@@ -11,6 +12,8 @@ class DatabaseConnector:
         self.schema_manager: Optional[SchemaManager] = None  # Will be set by DatabaseContext
         self.target_schema: Optional[str] = target_schema
         self.thick_mode = use_thick_mode
+        self._pool = None
+        self._pool_lock = asyncio.Lock()
         
         if self.thick_mode:
             try:
@@ -21,28 +24,72 @@ class DatabaseConnector:
                 print("Falling back to thin mode", file=sys.stderr)
                 self.thick_mode = False
 
+    async def initialize_pool(self):
+        """Initialize the connection pool"""
+        async with self._pool_lock:
+            if self._pool is None:
+                try:
+                    if self.thick_mode:
+                        self._pool = oracledb.create_pool(
+                            self.connection_string,
+                            min=2,
+                            max=10,
+                            increment=1,
+                            getmode=oracledb.POOL_GETMODE_WAIT
+                        )
+                    else:
+                        self._pool = await oracledb.create_pool_async(
+                            self.connection_string,
+                            min=2,
+                            max=10,
+                            increment=1,
+                            getmode=oracledb.POOL_GETMODE_WAIT
+                        )
+                    print("Database connection pool initialized", file=sys.stderr)
+                except Exception as e:
+                    print(f"Error creating connection pool: {e}", file=sys.stderr)
+                    raise
+
+    async def get_connection(self):
+        """Get a connection from the pool"""
+        if self._pool is None:
+            await self.initialize_pool()
+            
+        try:
+            if self.thick_mode:
+                return self._pool.acquire()
+            else:
+                return await self._pool.acquire()
+        except Exception as e:
+            print(f"Error acquiring connection from pool: {e}", file=sys.stderr)
+            raise
+
+    async def _close_connection(self, conn):
+        """Return connection to the pool"""
+        try:
+            if self.thick_mode:
+                self._pool.release(conn)
+            else:
+                await self._pool.release(conn)
+        except Exception as e:
+            print(f"Error releasing connection to pool: {e}", file=sys.stderr)
+
+    async def close_pool(self):
+        """Close the connection pool"""
+        if self._pool:
+            try:
+                if self.thick_mode:
+                    self._pool.close()
+                else:
+                    await self._pool.close()
+                self._pool = None
+                print("Connection pool closed", file=sys.stderr)
+            except Exception as e:
+                print(f"Error closing connection pool: {e}", file=sys.stderr)
+
     def set_schema_manager(self, schema_manager: SchemaManager) -> None:
         """Set the schema manager reference"""
         self.schema_manager = schema_manager
-
-    async def get_connection(self):
-        """Create and return a database connection"""
-        try:
-            print(f"Connecting to database with connection string: {self.connection_string}", file=sys.stderr)
-            if self.thick_mode:
-                # Use regular connect for thick mode
-                return oracledb.connect(self.connection_string)
-            else:
-                # Use connect_async for thin mode
-                return await oracledb.connect_async(self.connection_string)
-        except oracledb.Error as e:
-            print(f"Database connection error: {str(e)}", file=sys.stderr)
-            if "DPY-3015" in str(e) and not self.thick_mode:
-                print("Consider using thick mode by setting THICK_MODE=True", file=sys.stderr)
-            raise
-        except Exception as e:
-            print(f"Unexpected error while connecting to database: {str(e)}", file=sys.stderr)
-            raise
 
     async def _execute_cursor(self, cursor, sql: str, **params):
         """Helper method to execute cursor operations based on mode"""

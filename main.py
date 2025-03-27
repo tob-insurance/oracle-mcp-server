@@ -43,8 +43,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DatabaseContext]:
         print("Cache ready!", file=sys.stderr)
         yield db_context
     finally:
-        # Cleanup isn't needed in this case
-        pass
+        # Ensure proper cleanup of database resources
+        print("Closing database connections...", file=sys.stderr)
+        await db_context.close()
+        print("Database connections closed", file=sys.stderr)
 
 # Initialize FastMCP server
 mcp = FastMCP("db-context", lifespan=app_lifespan)

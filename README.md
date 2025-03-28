@@ -81,7 +81,7 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
         }
       ],
        "servers": {
-           "db-context": {
+           "oracle": {
                "command": "docker",
                "args": [
                    "run",
@@ -95,7 +95,7 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
                    "CACHE_DIR",
                    "-e",
                    "THICK_MODE",
-                   "dmeppiel/mcp-db-context"
+                   "dmeppiel/oracle-mcp-server"
                ],
                "env": {
                   "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
@@ -134,8 +134,8 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
    3. **Project Setup**
       ```bash
       # Clone repository
-      git clone https://github.com/yourusername/mcp-db-context.git
-      cd mcp-db-context
+      git clone https://github.com/yourusername/oracle-mcp-server.git
+      cd oracle-mcp-server
 
       # Create and activate virtual environment
       uv venv
@@ -162,11 +162,11 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
             }
          ],
          "servers": {
-            "db-context": {
+            "oracle": {
                   "command": "/path/to/your/.local/bin/uv",
                   "args": [
                      "--directory",
-                     "/path/to/your/mcp-db-context",
+                     "/path/to/your/oracle-mcp-server",
                      "run",
                      "main.py"
                   ],
@@ -180,7 +180,7 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
          }
       }
       ```
-   - Replace the paths with your actual uv binary path and mcp-db-context directory path
+   - Replace the paths with your actual uv binary path and oracle-mcp-server directory path
 
 For both options:
 - Replace the `ORACLE_CONNECTION_STRING` with your actual database connection string

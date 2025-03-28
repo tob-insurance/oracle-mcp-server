@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: dmeppiel/mcp-db-context
+  IMAGE_NAME: dmeppiel/oracle-mcp-server
 
 jobs:
   publish:

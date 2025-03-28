@@ -49,7 +49,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DatabaseContext]:
         print("Database connections closed", file=sys.stderr)
 
 # Initialize FastMCP server
-mcp = FastMCP("db-context", lifespan=app_lifespan)
+mcp = FastMCP("oracle", lifespan=app_lifespan)
 print("FastMCP server initialized", file=sys.stderr)
 
 @mcp.tool()

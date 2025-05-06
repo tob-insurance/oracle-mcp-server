@@ -194,6 +194,7 @@ To run the MCP server directly:
 ```bash
 uv run main.py
 # Reference: uv run --python D:\oracle-mcp-server\.venv\Scripts\python.exe --with mcp[cli] mcp run D:\oracle-mcp-server\main.py
+# Reference By Supergateway: npx -y supergateway --stdio "uv run main.py" --port 8000 --baseUrl http://localhost:8000 --ssePath /sse --messagePath /message (Subscribe to events: GET http://localhost:8000/sse;Send messages: POST http://localhost:8000/message)
 ```
 
 For development and testing:

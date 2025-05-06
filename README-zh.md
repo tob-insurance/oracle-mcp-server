@@ -194,6 +194,7 @@ MCP Oracle DB Context 服务器解决了在处理超大型 Oracle 数据库时�
 ```bash
 uv run main.py
 # Reference: uv run --python D:\oracle-mcp-server\.venv\Scripts\python.exe --with mcp[cli] mcp run D:\oracle-mcp-server\main.py
+# Reference By Supergateway: npx -y supergateway --stdio "uv run main.py" --port 8000 --baseUrl http://localhost:8000 --ssePath /sse --messagePath /message (Subscribe to events: GET http://localhost:8000/sse;Send messages: POST http://localhost:8000/message)
 ```
 
 开发和测试：

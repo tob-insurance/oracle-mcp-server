@@ -7,7 +7,7 @@ from pathlib import Path
 from .models import SchemaManager
 
 class DatabaseConnector:
-    def __init__(self, connection_string: str, target_schema: Optional[str] = None, use_thick_mode: bool = False):
+    def __init__(self, connection_string: str, target_schema: Optional[str] = None, use_thick_mode: bool = False, lib_dir: Optional[str] = None):
         self.connection_string = connection_string
         self.schema_manager: Optional[SchemaManager] = None  # Will be set by DatabaseContext
         self.target_schema: Optional[str] = target_schema
@@ -17,7 +17,10 @@ class DatabaseConnector:
         
         if self.thick_mode:
             try:
-                oracledb.init_oracle_client()
+                if lib_dir:
+                    oracledb.init_oracle_client(lib_dir=lib_dir)
+                else:
+                    oracledb.init_oracle_client()
                 print("Oracle Client initialized in thick mode", file=sys.stderr)
             except Exception as e:
                 print(f"Warning: Could not initialize Oracle Client: {e}", file=sys.stderr)
@@ -38,7 +41,7 @@ class DatabaseConnector:
                             getmode=oracledb.POOL_GETMODE_WAIT
                         )
                     else:
-                        self._pool = await oracledb.create_pool_async(
+                        self._pool = oracledb.create_pool_async(
                             self.connection_string,
                             min=2,
                             max=10,

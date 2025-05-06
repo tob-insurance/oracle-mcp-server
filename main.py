@@ -17,6 +17,7 @@ ORACLE_CONNECTION_STRING = os.getenv('ORACLE_CONNECTION_STRING')
 TARGET_SCHEMA = os.getenv('TARGET_SCHEMA')  # Optional schema override
 CACHE_DIR = os.getenv('CACHE_DIR', '.cache')
 USE_THICK_MODE = os.getenv('THICK_MODE', '').lower() in ('true', '1', 'yes')  # Convert string to boolean
+ORACLE_CLIENT_LIB_DIR = os.getenv('ORACLE_CLIENT_LIB_DIR', None)
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[DatabaseContext]:
@@ -33,7 +34,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DatabaseContext]:
         connection_string=connection_string,
         cache_path=cache_dir / 'schema_cache.json',
         target_schema=TARGET_SCHEMA,
-        use_thick_mode=USE_THICK_MODE  # Pass the thick mode setting
+        use_thick_mode=USE_THICK_MODE,  # Pass the thick mode setting
+        lib_dir=ORACLE_CLIENT_LIB_DIR
     )
     
     try:

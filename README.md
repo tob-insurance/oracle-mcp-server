@@ -193,6 +193,7 @@ To run the MCP server directly:
 
 ```bash
 uv run main.py
+# Reference: uv run --python D:\oracle-mcp-server\.venv\Scripts\python.exe --with mcp[cli] mcp run D:\oracle-mcp-server\main.py
 ```
 
 For development and testing:

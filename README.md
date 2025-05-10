@@ -1,5 +1,7 @@
 # MCP Server - Oracle DB Context
 
+[English](README.md) | [中文](README-zh.md)
+
 A powerful Model Context Protocol (MCP) server that provides contextual database schema information for large Oracle databases, enabling AI assistants to understand and work with databases containing thousands of tables.
 
 ## Table of Contents
@@ -101,7 +103,8 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
                   "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
                   "TARGET_SCHEMA":"",
                   "CACHE_DIR":".cache",
-                  "THICK_MODE":""  // Optional: set to "1" to enable thick mode
+                  "THICK_MODE":"",  // Optional: set to "1" to enable thick mode
+                  "ORACLE_CLIENT_LIB_DIR":"" // Optional: in case you use thick mode and you want to set a non-default directory for client libraries
                }
            }
        }
@@ -111,6 +114,7 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
    When using Docker (recommended approach):
    - All dependencies are included in the container
    - Set `THICK_MODE=1` in the environment variables to enable thick mode if needed
+   - If you use `THICK_MODE`, you can optionally set the path where Oracle Client libraries are installed with `ORACLE_CLIENT_LIB_DIR` if it differs from the default location. 
 
 #### Option 2: Using UV (Local Installation)
    
@@ -174,7 +178,8 @@ In VSCode Insiders, go to your user or workspace `settings.json` file and add th
                      "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
                      "TARGET_SCHEMA":"",
                      "CACHE_DIR":".cache",
-                     "THICK_MODE":""  // Optional: set to "1" to enable thick mode
+                     "THICK_MODE":"",  // Optional: set to "1" to enable thick mode
+                     "ORACLE_CLIENT_LIB_DIR":"" // Optional: in case you use thick mode and if you want to set a non-default directory for client libraries
                   }
             }
          }
@@ -193,8 +198,6 @@ To run the MCP server directly:
 
 ```bash
 uv run main.py
-# Reference: uv run --python D:\oracle-mcp-server\.venv\Scripts\python.exe --with mcp[cli] mcp run D:\oracle-mcp-server\main.py
-# Reference By Supergateway: npx -y supergateway --stdio "uv run main.py" --port 8000 --baseUrl http://localhost:8000 --ssePath /sse --messagePath /message (Subscribe to events: GET http://localhost:8000/sse;Send messages: POST http://localhost:8000/message)
 ```
 
 For development and testing:
@@ -339,7 +342,13 @@ For scenarios requiring advanced Oracle features or better performance, you can 
 - When using Docker (recommended): Set `THICK_MODE=1` in the Docker environment variables
 - When using local installation: Export `THICK_MODE=1` environment variable and ensure Oracle Client libraries, compatible with your system architecture and database version, are installed
 
-Note: When using Docker, you don't need to worry about installing Oracle Client libraries as they are included in the container (Oracle Instant Client v23.7). The container supports Oracle databases versions 19c up to 23ai in both linux/arm64 and linux/amd64 architectures. 
+You can specify a custom location for the Oracle Client libraries using the `ORACLE_CLIENT_LIB_DIR` environment variable. This is particularly useful when:
+- You have Oracle Client libraries installed in non-standard locations
+- You need to work with multiple Oracle Client versions on the same system
+- You don't have administrative privileges to install Oracle Client in standard locations
+- You need specific Oracle Client versions for compatibility with certain database features
+
+Note: When using Docker, you don't need to worry about installing Oracle Client libraries as they are included in the container (Oracle Instant Client v23.7). The container supports Oracle databases versions 19c up to 23ai in both linux/arm64 and linux/amd64 architectures.
 
 ## System Requirements
 

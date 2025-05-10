@@ -1,5 +1,7 @@
 # MCP 服务器 - Oracle 数据库上下文
 
+[English](README.md) | [中文](README-zh.md)
+
 一个强大的模型上下文协议（MCP）服务器，为大型 Oracle 数据库提供上下文数据库模式信息，使 AI 助手能够理解和操作包含数千张表的数据库。
 
 ## 目录
@@ -101,7 +103,8 @@ MCP Oracle DB Context 服务器解决了在处理超大型 Oracle 数据库时�
                   "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
                   "TARGET_SCHEMA":"",
                   "CACHE_DIR":".cache",
-                  "THICK_MODE":""  // 可选：设置为 "1" 以启用 thick 模式
+                  "THICK_MODE":"",  // 可选：设置为 "1" 以启用 thick 模式
+                  "ORACLE_CLIENT_LIB_DIR":"" // 可选：如果使用 thick 模式并且想要设置非默认的客户端库目录
                }
            }
        }
@@ -111,6 +114,7 @@ MCP Oracle DB Context 服务器解决了在处理超大型 Oracle 数据库时�
    使用 Docker（推荐方式）：
    - 所有依赖项都包含在容器中
    - 如需启用 thick 模式，在环境变量中设置 `THICK_MODE=1`
+   - 如果使用 `THICK_MODE`，可以通过 `ORACLE_CLIENT_LIB_DIR` 来设置 Oracle 客户端库的安装路径（如果与默认位置不同）
 
 #### 选项 2：使用 UV（本地安装）
    
@@ -174,7 +178,8 @@ MCP Oracle DB Context 服务器解决了在处理超大型 Oracle 数据库时�
                      "ORACLE_CONNECTION_STRING":"<db-username>/${input:db-password}@<host>:1521/<service-name>",
                      "TARGET_SCHEMA":"",
                      "CACHE_DIR":".cache",
-                     "THICK_MODE":""  // 可选：设置为 "1" 以启用 thick 模式
+                     "THICK_MODE":"",  // 可选：设置为 "1" 以启用 thick 模式
+                     "ORACLE_CLIENT_LIB_DIR":"" // 可选：如果使用 thick 模式并且想要设置非默认的客户端库目录
                   }
             }
          }
@@ -193,8 +198,6 @@ MCP Oracle DB Context 服务器解决了在处理超大型 Oracle 数据库时�
 
 ```bash
 uv run main.py
-# Reference: uv run --python D:\oracle-mcp-server\.venv\Scripts\python.exe --with mcp[cli] mcp run D:\oracle-mcp-server\main.py
-# Reference By Supergateway: npx -y supergateway --stdio "uv run main.py" --port 8000 --baseUrl http://localhost:8000 --ssePath /sse --messagePath /message (Subscribe to events: GET http://localhost:8000/sse;Send messages: POST http://localhost:8000/message)
 ```
 
 开发和测试：
@@ -339,6 +342,12 @@ ORDERS 表与哪些表有关联？
 - 使用 Docker（推荐）：在 Docker 环境变量中设置 `THICK_MODE=1`
 - 本地安装时：导出 `THICK_MODE=1` 环境变量，并确保已安装与系统架构和数据库版本兼容的 Oracle Client 库
 
+您可以使用 `ORACLE_CLIENT_LIB_DIR` 环境变量指定 Oracle Client 库的自定义位置。这在以下情况下特别有用：
+- Oracle Client 库安装在非标准位置
+- 需要在同一系统上使用多个 Oracle Client 版本
+- 没有管理员权限将 Oracle Client 安装在标准位置
+- 需要特定的 Oracle Client 版本以兼容某些数据库功能
+
 注意：使用 Docker 时无需担心 Oracle Client 库的安装，容器已包含（Oracle Instant Client v23.7）。该容器支持 19c 至 23ai 版本的 Oracle 数据库，兼容 linux/arm64 和 linux/amd64 架构。
 
 ## 系统要求
@@ -358,7 +367,7 @@ ORDERS 表与哪些表有关联？
 
 ## 贡献
 
-欢迎贡献！详情请参阅我们的 [贡献指南](CONTRIBUTING.md)。
+我们欢迎贡献！请参阅我们的 [贡献指南](CONTRIBUTING.md) 获取详细信息。
 
 ## 许可证
 

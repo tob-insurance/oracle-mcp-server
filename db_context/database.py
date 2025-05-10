@@ -38,7 +38,7 @@ class DatabaseConnector:
                             getmode=oracledb.POOL_GETMODE_WAIT
                         )
                     else:
-                        self._pool = await oracledb.create_pool_async(
+                        self._pool = oracledb.create_pool_async(
                             self.connection_string,
                             min=2,
                             max=10,

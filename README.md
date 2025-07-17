@@ -308,6 +308,13 @@ Example:
 What tables are related to the ORDERS table?
 ```
 
+#### `run_sql_query`
+Execute a read-only SQL query and return the results in a formatted table.
+Example:
+```
+Can you run this query for me? SELECT * FROM EMPLOYEES WHERE DEPARTMENT_ID = 10
+```
+
 ## Architecture
 
 This MCP server employs a three-layer architecture optimized for large-scale Oracle databases:

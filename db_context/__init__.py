@@ -133,6 +133,10 @@ class DatabaseContext:
         await self.schema_manager.save_cache()
         return result
 
+    async def run_sql_query(self, sql: str, params: Optional[Dict[str, Any]] = None, max_rows: int = 100) -> Dict[str, Any]:
+        """Runs a SQL query and returns the results."""
+        return await self.db_connector.execute_sql_query(sql, params, max_rows)
+
     async def explain_query_plan(self, query: str) -> Dict[str, Any]:
         """Get execution plan for an SQL query with optimization suggestions"""
         return await self.db_connector.explain_query_plan(query)

@@ -607,5 +607,45 @@ async def get_related_tables(table_name: str, ctx: Context) -> str:
     except Exception as e:
         return f"Error getting related tables: {str(e)}"
 
+@mcp.tool()
+async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
+    """
+    Execute a read-only SQL query and return the results in a formatted table.
+    This tool should be used for executing SELECT statements. It is not suitable for DML or DDL statements.
+
+    Args:
+        sql: The SQL query to execute.
+        max_rows: The maximum number of rows to return (default is 100).
+
+    Returns:
+        A string containing the query results in a formatted table, or an error message if the query fails.
+    """
+    db_context: DatabaseContext = ctx.request_context.lifespan_context
+    try:
+        result = await db_context.run_sql_query(sql, max_rows=max_rows)
+        
+        if "error" in result:
+            return f"Error executing query: {result['error']}"
+        
+        if not result["rows"]:
+            return "Query executed successfully, but returned no rows."
+            
+        # Format the result as a markdown table
+        headers = result["columns"]
+        rows = result["rows"]
+        
+        # Header
+        formatted_result = "| " + " | ".join(headers) + " |\n"
+        # Separator
+        formatted_result += "| " + " | ".join(["---"] * len(headers)) + " |\n"
+        # Rows
+        for row in rows:
+            formatted_result += "| " + " | ".join(str(row[h]) for h in headers) + " |\n"
+            
+        return formatted_result
+        
+    except Exception as e:
+        return f"An unexpected error occurred: {str(e)}"
+
 if __name__ == "__main__":
     mcp.run()

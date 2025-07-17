@@ -686,7 +686,7 @@ class DatabaseConnector:
             await self._close_connection(conn)
             
     async def search_columns_in_database(self, table_names: List[str], search_term: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Search for columns in specified tables"""
+        """Search for columns with a given pattern within a list of tables"""
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
@@ -722,9 +722,55 @@ class DatabaseConnector:
             
         finally:
             await self._close_connection(conn)
-    
+
+            
+    async def execute_sql_query(self, sql: str, params: Optional[Dict[str, Any]] = None, max_rows: int = 100) -> Dict[str, Any]:
+        """
+        Executes a read-only SQL query and returns the results.
+        
+        Args:
+            sql: The SQL query to execute.
+            params: A dictionary of bind parameters for the query.
+            max_rows: The maximum number of rows to return.
+            
+        Returns:
+            A dictionary containing the query results, including column definitions and rows.
+        """
+        conn = await self.get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Execute the query
+            if self.thick_mode:
+                cursor.execute(sql, params or {})
+                rows = cursor.fetchmany(max_rows)  # type: ignore[misc]
+            else:
+                await cursor.execute(sql, params or {})
+                rows = await cursor.fetchmany(max_rows)  # type: ignore[misc]
+            
+            rows = list(rows)  # type: ignore[arg-type]
+
+            # Get column names from the cursor description
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            
+            # Format rows as a list of dictionaries
+            result_rows = [dict(zip(columns, row)) for row in rows]
+            
+            return {
+                "columns": columns,
+                "rows": result_rows,
+                "row_count": len(result_rows)
+            }
+        except oracledb.Error as e:
+            return {"error": str(e)}
+        finally:
+            await self._close_connection(conn)
+
     async def explain_query_plan(self, query: str) -> Dict[str, Any]:
-        """Get execution plan for a SQL query"""
+        """
+        Get the execution plan for a given SQL query and provide optimization suggestions.
+        This tool uses 'EXPLAIN PLAN FOR' to analyze the query without executing it.
+        """
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()

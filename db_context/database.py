@@ -113,6 +113,11 @@ class DatabaseConnector:
             await cursor.execute(sql, **params)  # Async execution
             return await cursor.fetchall()
 
+    def _assert_query_executable(self, sql: str) -> None:
+        """Check if a query can be executed based on read-only mode and query type."""
+        if self.read_only and not self._is_select_query(sql):
+            raise PermissionError("Read-only mode: only SELECT statements are permitted.")
+
     def _assert_write_allowed(self) -> None:
         """Raise if the connector is in read-only mode."""
         if self.read_only:
@@ -120,7 +125,7 @@ class DatabaseConnector:
 
     async def _execute_cursor_no_fetch(self, cursor, sql: str, **params):
         """Helper method for statements that modify data (e.g. DELETE, UPDATE)."""
-        self._assert_write_allowed()
+        self._assert_query_executable(sql)
         if self.thick_mode:
             cursor.execute(sql, **params)
         else:
@@ -755,9 +760,8 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             
-            # Disallow DML/DDL in read-only mode
-            if self.read_only and not self._is_select_query(sql):
-                return {"error": "Read-only mode: only SELECT statements are permitted."}
+            # Check if query is executable
+            self._assert_query_executable(sql)
 
             if self.thick_mode:
                 cursor.execute(sql, params or {})
@@ -802,12 +806,8 @@ class DatabaseConnector:
         Get the execution plan for a given SQL query and provide optimization suggestions.
         This tool uses 'EXPLAIN PLAN FOR' to analyze the query without executing it.
         """
-        if self.read_only:
-            return {
-                "execution_plan": [],
-                "optimization_suggestions": [],
-                "error": "Explain plan is disabled in read-only mode."
-            }
+        # Check if explain plan is allowed
+        self._assert_query_executable(query)
 
         conn = await self.get_connection()
         try:
@@ -852,6 +852,12 @@ class DatabaseConnector:
             return {
                 "execution_plan": [],
                 "optimization_suggestions": ["Unable to generate execution plan due to error."],
+                "error": str(e)
+            }
+        except PermissionError as e:
+            return {
+                "execution_plan": [],
+                "optimization_suggestions": [],
                 "error": str(e)
             }
         finally:

@@ -639,7 +639,12 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
     try:
         result = await db_context.run_sql_query(sql, max_rows=max_rows)
         
-        if not result["rows"]:
+        if "error" in result:
+            raise Exception(result['error'])
+        
+        if not result.get("rows"):
+            if "message" in result:
+                return result["message"]
             return "Query executed successfully, but returned no rows."
             
         formatted_result = format_sql_query_result(result)

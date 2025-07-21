@@ -313,13 +313,13 @@ What tables are related to the ORDERS table?
 ```
 
 #### `run_sql_query`
-Execute a read-only SQL query and return the results in a formatted table.
+Execute a SQL query and return the results in a formatted table.
 Example:
 ```
 Can you run this query for me? SELECT * FROM EMPLOYEES WHERE DEPARTMENT_ID = 10
 ```
 
-**Note**: In read-only mode (default), only SELECT statements are permitted. Write operations (INSERT, UPDATE, DELETE) are blocked for security.
+**Note**: In read-only mode (default), only SELECT statements are permitted. Write operations (INSERT, UPDATE, DELETE) are blocked for security. When read-only mode is deactivated (`READ_ONLY_MODE="0"`), this tool can execute both read and write operations.
 
 ## Architecture
 

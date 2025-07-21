@@ -635,11 +635,9 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
         A string containing the query results in a formatted table, or an error message if the query fails.
     """
     db_context: DatabaseContext = ctx.request_context.lifespan_context
+    
     try:
         result = await db_context.run_sql_query(sql, max_rows=max_rows)
-        
-        if "error" in result:
-            return wrap_untrusted(f"Error executing query: {result['error']}")
         
         if not result["rows"]:
             return "Query executed successfully, but returned no rows."
@@ -648,7 +646,7 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
         return wrap_untrusted(formatted_result)
         
     except Exception as e:
-        return wrap_untrusted(f"An unexpected error occurred: {str(e)}")
+        return wrap_untrusted(f"Error executing query: {str(e)}")
 
 if __name__ == "__main__":
     mcp.run()

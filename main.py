@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import uuid
 
 from db_context import DatabaseContext
+from db_context.schema.formatter import format_sql_query_result
 
 # Load environment variables from .env file
 load_dotenv()
@@ -643,18 +644,7 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
         if not result["rows"]:
             return "Query executed successfully, but returned no rows."
             
-        # Format the result as a markdown table
-        headers = result["columns"]
-        rows = result["rows"]
-        
-        # Header
-        formatted_result = "| " + " | ".join(headers) + " |\n"
-        # Separator
-        formatted_result += "| " + " | ".join(["---"] * len(headers)) + " |\n"
-        # Rows
-        for row in rows:
-            formatted_result += "| " + " | ".join(str(row[h]) for h in headers) + " |\n"
-            
+        formatted_result = format_sql_query_result(result)
         return wrap_untrusted(formatted_result)
         
     except Exception as e:

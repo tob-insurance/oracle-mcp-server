@@ -360,3 +360,31 @@ def _format_relationship_groups(groups: List[Dict[str, Any]], result: List[str])
             result.append(f"    - {group['pattern']}:")
             for pattern in sorted(group['column_patterns']):
                 result.append(f"      {pattern}")
+
+def format_sql_query_result(result: Dict[str, Any]) -> str:
+    """
+    Format SQL query results as a markdown table.
+    
+    Args:
+        result: Dictionary containing query results with 'columns' and 'rows' keys
+        
+    Returns:
+        Formatted markdown table string
+    """
+    if not result.get("rows"):
+        return "Query executed successfully, but returned no rows."
+    
+    headers = result["columns"]
+    rows = result["rows"]
+    
+    formatted_result = []
+    
+    # Header
+    formatted_result.append("| " + " | ".join(headers) + " |")
+    # Separator
+    formatted_result.append("| " + " | ".join(["---"] * len(headers)) + " |")
+    # Rows
+    for row in rows:
+        formatted_result.append("| " + " | ".join(str(row[h]) for h in headers) + " |")
+    
+    return "\n".join(formatted_result)

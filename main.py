@@ -18,6 +18,7 @@ ORACLE_CONNECTION_STRING = os.getenv('ORACLE_CONNECTION_STRING')
 TARGET_SCHEMA = os.getenv('TARGET_SCHEMA')  # Optional schema override
 CACHE_DIR = os.getenv('CACHE_DIR', '.cache')
 USE_THICK_MODE = os.getenv('THICK_MODE', '').lower() in ('true', '1', 'yes')  # Convert string to boolean
+READ_ONLY_MODE = os.getenv('READ_ONLY_MODE', 'true').lower() not in ('false', '0', 'no')
 ORACLE_CLIENT_LIB_DIR = os.getenv('ORACLE_CLIENT_LIB_DIR', None)
 
 def wrap_untrusted(data: str) -> str:
@@ -46,7 +47,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[DatabaseContext]:
         cache_path=cache_dir / 'schema_cache.json',
         target_schema=TARGET_SCHEMA,
         use_thick_mode=USE_THICK_MODE,  # Pass the thick mode setting
-        lib_dir=ORACLE_CLIENT_LIB_DIR
+        lib_dir=ORACLE_CLIENT_LIB_DIR,
+        read_only=READ_ONLY_MODE
     )
     
     try:

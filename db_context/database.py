@@ -7,11 +7,21 @@ from pathlib import Path
 from .models import SchemaManager
 
 class DatabaseConnector:
-    def __init__(self, connection_string: str, target_schema: Optional[str] = None, use_thick_mode: bool = False, lib_dir: Optional[str] = None):
+    def __init__(self, connection_string: str, target_schema: Optional[str] = None, use_thick_mode: bool = False, lib_dir: Optional[str] = None, read_only: bool = True):
+        """Create a new connector.
+
+        Args:
+            connection_string: Oracle connection string
+            target_schema: Optional schema override
+            use_thick_mode: Whether to use thick mode for Oracle client
+            lib_dir: Optional Oracle client library directory
+            read_only: When True (default) all write operations will be blocked.
+        """
         self.connection_string = connection_string
         self.schema_manager: Optional[SchemaManager] = None  # Will be set by DatabaseContext
         self.target_schema: Optional[str] = target_schema
         self.thick_mode = use_thick_mode
+        self.read_only = read_only
         self._pool = None
         self._pool_lock = asyncio.Lock()
         
@@ -103,8 +113,14 @@ class DatabaseConnector:
             await cursor.execute(sql, **params)  # Async execution
             return await cursor.fetchall()
 
+    def _assert_write_allowed(self) -> None:
+        """Raise if the connector is in read-only mode."""
+        if self.read_only:
+            raise PermissionError("Read-only mode: write operations are disabled")
+
     async def _execute_cursor_no_fetch(self, cursor, sql: str, **params):
-        """Helper method for cursor operations that don't need fetching (e.g. DELETE, UPDATE)"""
+        """Helper method for statements that modify data (e.g. DELETE, UPDATE)."""
+        self._assert_write_allowed()
         if self.thick_mode:
             cursor.execute(sql, **params)
         else:
@@ -112,9 +128,10 @@ class DatabaseConnector:
 
     async def _commit(self, conn):
         """Commit the current transaction"""
+        self._assert_write_allowed()
         if self.thick_mode:
             conn.commit()
-        else:         
+        else:
             await conn.commit()
 
 
@@ -691,39 +708,37 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
-            result = {}
-            
-            # Get columns for the specified tables that match the search term
-            rows = await self._execute_cursor(cursor, """
-                SELECT /*+ RESULT_CACHE */ 
-                    table_name,
-                    column_name,
-                    data_type,
-                    nullable
-                FROM all_tab_columns 
-                WHERE owner = :owner
-                AND table_name IN (SELECT column_value FROM TABLE(CAST(:table_names AS SYS.ODCIVARCHAR2LIST)))
-                AND UPPER(column_name) LIKE '%' || :search_term || '%'
-                ORDER BY table_name, column_id
-            """, owner=schema, 
-                table_names=table_names,
-                search_term=search_term.upper())
-            
-            for table_name, column_name, data_type, nullable in rows:
-                if table_name not in result:
-                    result[table_name] = []
-                result[table_name].append({
-                    "name": column_name,
-                    "type": data_type,
-                    "nullable": nullable == 'Y'
-                })
-            
-            return result
-            
+            results = {}
+
+            # Optimized query to search for columns in the specified tables
+            # Using bind variables for table names is not directly supported in a single query like this,
+            # so we iterate. But we can optimize the query itself for each table.
+            for table_name in table_names:
+                query = """
+                SELECT column_name, data_type, nullable
+                FROM all_tab_columns
+                WHERE owner = :owner 
+                AND table_name = :table_name
+                AND column_name LIKE :search_pattern
+                ORDER BY column_id
+                """
+                
+                rows = await self._execute_cursor(
+                    cursor,
+                    query,
+                    owner=schema,
+                    table_name=table_name.upper(),
+                    search_pattern=f"%{search_term.upper()}%"
+                )
+                
+                if rows:
+                    results[table_name] = [{"name": r[0], "type": r[1], "nullable": r[2] == 'Y'} for r in rows]
+
+            return results
         finally:
             await self._close_connection(conn)
 
-            
+
     async def execute_sql_query(self, sql: str, params: Optional[Dict[str, Any]] = None, max_rows: int = 100) -> Dict[str, Any]:
         """
         Executes a read-only SQL query and returns the results.
@@ -740,28 +755,44 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             
-            # Execute the query
+            # Disallow DML/DDL in read-only mode
+            if self.read_only and not self._is_select_query(sql):
+                return {"error": "Read-only mode: only SELECT statements are permitted."}
+
             if self.thick_mode:
                 cursor.execute(sql, params or {})
-                rows = cursor.fetchmany(max_rows)  # type: ignore[misc]
             else:
                 await cursor.execute(sql, params or {})
-                rows = await cursor.fetchmany(max_rows)  # type: ignore[misc]
-            
-            rows = list(rows)  # type: ignore[arg-type]
 
-            # Get column names from the cursor description
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            # Check if this is a SELECT query (has description)
+            if cursor.description:
+                if self.thick_mode:
+                    rows = cursor.fetchmany(max_rows)  # type: ignore[misc]
+                else:
+                    rows = await cursor.fetchmany(max_rows)  # type: ignore[misc]
+                
+                rows = list(rows)  # type: ignore[arg-type]
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+                result_rows = [dict(zip(columns, row)) for row in rows]
+                
+                return {
+                    "columns": columns,
+                    "rows": result_rows,
+                    "row_count": len(result_rows)
+                }
+            else:
+                row_count = cursor.rowcount
+                await self._commit(conn)
+                return {
+                    "columns": [],
+                    "rows": [],
+                    "row_count": row_count,
+                    "message": f"Statement executed successfully. {row_count} row(s) affected."
+                }
             
-            # Format rows as a list of dictionaries
-            result_rows = [dict(zip(columns, row)) for row in rows]
-            
-            return {
-                "columns": columns,
-                "rows": result_rows,
-                "row_count": len(result_rows)
-            }
         except oracledb.Error as e:
+            return {"error": str(e)}
+        except PermissionError as e:
             return {"error": str(e)}
         finally:
             await self._close_connection(conn)
@@ -771,6 +802,13 @@ class DatabaseConnector:
         Get the execution plan for a given SQL query and provide optimization suggestions.
         This tool uses 'EXPLAIN PLAN FOR' to analyze the query without executing it.
         """
+        if self.read_only:
+            return {
+                "execution_plan": [],
+                "optimization_suggestions": [],
+                "error": "Explain plan is disabled in read-only mode."
+            }
+
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
@@ -857,12 +895,8 @@ class DatabaseConnector:
             
         return suggestions
 
-    async def _close_connection(self, conn):
-        """Helper method to close connection based on mode"""
-        try:
-            if self.thick_mode:
-                conn.close()  # Synchronous close for thick mode
-            else:
-                await conn.close()  # Async close for thin mode
-        except Exception as e:
-            print(f"Error closing connection: {str(e)}", file=sys.stderr)
+    @staticmethod
+    def _is_select_query(sql: str) -> bool:
+        """Basic check to see if a statement is read-only (SELECT/CTE)."""
+        stripped = sql.lstrip().upper()
+        return stripped.startswith("SELECT") or stripped.startswith("WITH")

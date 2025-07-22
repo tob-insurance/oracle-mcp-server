@@ -786,7 +786,9 @@ class DatabaseConnector:
                 }
             else:
                 row_count = cursor.rowcount
-                await self._commit(conn)
+                # Only commit when the statement is an explicit DM or DDL operation
+                if self._is_write_operation(sql):
+                    await self._commit(conn)
                 return {
                     "columns": [],
                     "rows": [],
@@ -906,3 +908,21 @@ class DatabaseConnector:
         """Basic check to see if a statement is read-only (SELECT/CTE)."""
         stripped = sql.lstrip().upper()
         return stripped.startswith("SELECT") or stripped.startswith("WITH")
+
+    @staticmethod
+    def _is_write_operation(sql: str) -> bool:
+        """Return True if the SQL statement modifies data or structure."""
+        stripped = sql.lstrip().upper()
+        write_keywords = (
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "MERGE",
+            "CREATE",
+            "ALTER",
+            "DROP",
+            "TRUNCATE",
+            "GRANT",
+            "REVOKE",
+        )
+        return any(stripped.startswith(keyword) for keyword in write_keywords)

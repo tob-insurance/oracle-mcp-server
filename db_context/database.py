@@ -131,6 +131,17 @@ class DatabaseConnector:
             cursor.execute(sql, **params)
         else:
             await cursor.execute(sql, **params)
+    
+    async def _execute_cursor_with_fetch(self, cursor, sql: str, max_rows: int = 100, **params):
+        """Helper method for SELECT queries that need to fetch results."""
+        self._assert_query_executable(sql)
+        if self.thick_mode:
+            cursor.execute(sql, **params)
+            rows = cursor.fetchmany(max_rows)
+        else:
+            await cursor.execute(sql, **params)
+            rows = await cursor.fetchmany(max_rows)
+        return list(rows)
 
     async def _commit(self, conn):
         """Commit the current transaction"""
@@ -747,7 +758,7 @@ class DatabaseConnector:
 
     async def execute_sql_query(self, sql: str, params: Optional[Dict[str, Any]] = None, max_rows: int = 100) -> Dict[str, Any]:
         """
-        Executes a read-only SQL query and returns the results.
+        Executes a SQL query and returns the results.
         
         Args:
             sql: The SQL query to execute.
@@ -761,22 +772,9 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             
-            # Check if query is executable
-            self._assert_query_executable(sql)
-
-            if self.thick_mode:
-                cursor.execute(sql, params or {})
-            else:
-                await cursor.execute(sql, params or {})
-
             # Check if this is a SELECT query (has description)
-            if cursor.description:
-                if self.thick_mode:
-                    rows = cursor.fetchmany(max_rows)  # type: ignore[misc]
-                else:
-                    rows = await cursor.fetchmany(max_rows)  # type: ignore[misc]
-                
-                rows = list(rows)  # type: ignore[arg-type]
+            if self._is_select_query(sql):
+                rows = await self._execute_cursor_with_fetch(cursor, sql, max_rows, **(params or {}))
                 columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 result_rows = [dict(zip(columns, row)) for row in rows]
                 
@@ -786,8 +784,10 @@ class DatabaseConnector:
                     "row_count": len(result_rows)
                 }
             else:
+                await self._execute_cursor_no_fetch(cursor, sql, **(params or {}))
                 row_count = cursor.rowcount
-                # Only commit when the statement is an explicit DM or DDL operation
+                
+                # Only commit when the statement is an explicit DML or DDL operation
                 if self._is_write_operation(sql):
                     await self._commit(conn)
                 return {

@@ -725,33 +725,34 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
-            results = {}
+            result = {}
 
-            # Optimized query to search for columns in the specified tables
-            # Using bind variables for table names is not directly supported in a single query like this,
-            # so we iterate. But we can optimize the query itself for each table.
-            for table_name in table_names:
-                query = """
-                SELECT column_name, data_type, nullable
-                FROM all_tab_columns
-                WHERE owner = :owner 
-                AND table_name = :table_name
-                AND column_name LIKE :search_pattern
-                ORDER BY column_id
-                """
-                
-                rows = await self._execute_cursor(
-                    cursor,
-                    query,
-                    owner=schema,
-                    table_name=table_name.upper(),
-                    search_pattern=f"%{search_term.upper()}%"
-                )
-                
-                if rows:
-                    results[table_name] = [{"name": r[0], "type": r[1], "nullable": r[2] == 'Y'} for r in rows]
+            # Get columns for the specified tables that match the search term
+            rows = await self._execute_cursor(cursor, """
+                SELECT /*+ RESULT_CACHE */ 
+                    table_name,
+                    column_name,
+                    data_type,
+                    nullable
+                FROM all_tab_columns 
+                WHERE owner = :owner
+                AND table_name IN (SELECT column_value FROM TABLE(CAST(:table_names AS SYS.ODCIVARCHAR2LIST)))
+                AND UPPER(column_name) LIKE '%' || :search_term || '%'
+                ORDER BY table_name, column_id
+            """, owner=schema, 
+                table_names=table_names,
+                search_term=search_term.upper())
 
-            return results
+            for table_name, column_name, data_type, nullable in rows:
+                if table_name not in result:
+                    result[table_name] = []
+                result[table_name].append({
+                    "name": column_name,
+                    "type": data_type,
+                    "nullable": nullable == 'Y'
+                })
+
+            return result
         finally:
             await self._close_connection(conn)
 

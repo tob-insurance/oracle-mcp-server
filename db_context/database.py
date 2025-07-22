@@ -798,9 +798,9 @@ class DatabaseConnector:
                 }
             
         except oracledb.Error as e:
-            return {"error": str(e)}
+            raise e
         except PermissionError as e:
-            return {"error": str(e)}
+            raise e
         finally:
             await self._close_connection(conn)
 

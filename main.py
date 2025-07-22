@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
 import uuid
+import oracledb
 
 from db_context import DatabaseContext
 from db_context.schema.formatter import format_sql_query_result
@@ -641,9 +642,6 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
     try:
         result = await db_context.run_sql_query(sql, max_rows=max_rows)
         
-        if "error" in result:
-            raise Exception(result['error'])
-        
         if not result.get("rows"):
             if "message" in result:
                 return result["message"]
@@ -652,6 +650,10 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
         formatted_result = format_sql_query_result(result)
         return wrap_untrusted(formatted_result)
         
+    except oracledb.Error as e:
+        return wrap_untrusted(f"Database error: {str(e)}")
+    except PermissionError as e:
+        return wrap_untrusted(f"Permission error: {str(e)}")
     except Exception as e:
         return wrap_untrusted(f"Error executing query: {str(e)}")
 

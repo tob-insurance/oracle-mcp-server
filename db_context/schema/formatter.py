@@ -388,7 +388,7 @@ def format_sql_query_result(result: Dict[str, Any]) -> str:
         col_widths.append(max_width)
 
     def _pad(cell: str, width: int) -> str:
-        """Left-pad cell content to match the column width for aligned output."""
+        """Left-justify cell content (right-pad) to match the column width for aligned output."""
         return cell.ljust(width)
 
     formatted_result: List[str] = []

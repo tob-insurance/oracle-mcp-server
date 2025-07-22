@@ -1,5 +1,6 @@
 import sys
 import oracledb
+import re
 import time
 import asyncio
 from typing import Dict, List, Set, Optional, Any
@@ -905,9 +906,31 @@ class DatabaseConnector:
 
     @staticmethod
     def _is_select_query(sql: str) -> bool:
-        """Basic check to see if a statement is read-only (SELECT/CTE)."""
-        stripped = sql.lstrip().upper()
-        return stripped.startswith("SELECT") or stripped.startswith("WITH")
+        """Return True if the statement appears to be a *pure* read-only SELECT/CTE.
+
+        Heuristics used (cheap but reasonably safe for most cases):
+        1. Statement must start with SELECT or WITH.
+        2. No semicolon exists elsewhere (prevents stacked statements).
+        3. No DML/DDL keywords appear anywhere in the text (outside quotes is
+           not fully parsed but good enough as a guard-rail). For more robust
+           validation a full SQL parser should be used.
+        """
+        stripped = sql.lstrip()
+        upper_sql = stripped.upper()
+
+        if not (upper_sql.startswith("SELECT") or upper_sql.startswith("WITH")):
+            return False
+
+        # block attempts to chain multiple statements
+        if ";" in upper_sql:
+            return False
+
+        # simple keyword search for write operations
+        write_pattern = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE)\b", re.IGNORECASE)
+        if write_pattern.search(upper_sql):
+            return False
+
+        return True
 
     @staticmethod
     def _is_write_operation(sql: str) -> bool:

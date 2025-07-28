@@ -1,6 +1,6 @@
 import sys
 import oracledb
-import re
+import sqlparse
 import time
 import asyncio
 from typing import Dict, List, Set, Optional, Any
@@ -105,14 +105,31 @@ class DatabaseConnector:
         """Set the schema manager reference"""
         self.schema_manager = schema_manager
 
-    async def _execute_cursor(self, cursor, sql: str, **params):
-        """Helper method to execute cursor operations based on mode"""
+    async def _execute_cursor_fetch(self, cursor, sql: str, max_rows: Optional[int] = None, **params):
+        """Helper method to execute cursor operations and fetch results.
+        
+        Args:
+            cursor: Database cursor
+            sql: SQL query to execute
+            max_rows: Maximum number of rows to fetch. If None, fetches all rows.
+            **params: Query parameters
+            
+        Returns:
+            List of rows from the query result
+        """
         if self.thick_mode:
-            cursor.execute(sql, **params)  # Synchronous execution
-            return cursor.fetchall()
+            cursor.execute(sql, **params)
+            if max_rows is None:
+                return cursor.fetchall()
+            else:
+                return list(cursor.fetchmany(max_rows))
         else:
-            await cursor.execute(sql, **params)  # Async execution
-            return await cursor.fetchall()
+            await cursor.execute(sql, **params)
+            if max_rows is None:
+                return await cursor.fetchall()
+            else:
+                rows = await cursor.fetchmany(max_rows)
+                return list(rows)
 
     def _assert_query_executable(self, sql: str) -> None:
         """Check if a query can be executed based on read-only mode and query type."""
@@ -131,17 +148,6 @@ class DatabaseConnector:
             cursor.execute(sql, **params)
         else:
             await cursor.execute(sql, **params)
-    
-    async def _execute_cursor_with_fetch(self, cursor, sql: str, max_rows: int = 100, **params):
-        """Helper method for SELECT queries that need to fetch results."""
-        self._assert_query_executable(sql)
-        if self.thick_mode:
-            cursor.execute(sql, **params)
-            rows = cursor.fetchmany(max_rows)
-        else:
-            await cursor.execute(sql, **params)
-            rows = await cursor.fetchmany(max_rows)
-        return list(rows)
 
     async def _commit(self, conn):
         """Commit the current transaction"""
@@ -172,7 +178,7 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             # Query for database version information
-            version_info = await self._execute_cursor(cursor, "SELECT * FROM v$version")
+            version_info = await self._execute_cursor_fetch(cursor, "SELECT * FROM v$version")
             
             # Extract vendor type and full version string
             vendor_info = {}
@@ -204,7 +210,7 @@ class DatabaseConnector:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
             # Using RESULT_CACHE hint for frequently accessed data
-            all_tables = await self._execute_cursor(
+            all_tables = await self._execute_cursor_fetch(
                 cursor,
                 """
                 SELECT /*+ RESULT_CACHE */ table_name 
@@ -227,7 +233,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Check if the table exists using result cache
-            table_exists = await self._execute_cursor(
+            table_exists = await self._execute_cursor_fetch(
                 cursor,
                 """
                 SELECT /*+ RESULT_CACHE */ COUNT(*) 
@@ -242,7 +248,7 @@ class DatabaseConnector:
                 return None
                 
             # Get column information using result cache and index hints
-            columns = await self._execute_cursor(
+            columns = await self._execute_cursor_fetch(
                 cursor,
                 """
                 SELECT /*+ RESULT_CACHE INDEX(atc) */ 
@@ -264,7 +270,7 @@ class DatabaseConnector:
                 })
             
             # Get relationship information using optimized join order and result cache
-            relationships = await self._execute_cursor(
+            relationships = await self._execute_cursor_fetch(
                 cursor,
                 """
                 SELECT /*+ RESULT_CACHE */
@@ -342,7 +348,7 @@ class DatabaseConnector:
                 where_clause += " AND object_name LIKE :name_pattern"
                 params["name_pattern"] = name_pattern.upper()
             
-            objects = await self._execute_cursor(cursor, f"""
+            objects = await self._execute_cursor_fetch(cursor, f"""
                 SELECT object_name, object_type, status, created, last_ddl_time
                 FROM all_objects
                 {where_clause}
@@ -380,7 +386,7 @@ class DatabaseConnector:
             # Handle different object types accordingly
             if object_type in ('PACKAGE', 'PACKAGE BODY', 'TYPE', 'TYPE BODY'):
                 # For packages and types, we need to get the full source
-                source_lines = await self._execute_cursor(cursor, """
+                source_lines = await self._execute_cursor_fetch(cursor, """
                     SELECT text
                     FROM all_source
                     WHERE owner = :owner 
@@ -395,7 +401,7 @@ class DatabaseConnector:
                 return "\n".join(line[0] for line in source_lines)
             else:
                 # For procedures, functions, triggers, views, etc.
-                result = await self._execute_cursor(cursor, """
+                result = await self._execute_cursor_fetch(cursor, """
                     SELECT dbms_metadata.get_ddl(
                         :object_type, 
                         :object_name, 
@@ -427,7 +433,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Get all constraints for the table
-            constraints = await self._execute_cursor(cursor, """
+            constraints = await self._execute_cursor_fetch(cursor, """
                 SELECT ac.constraint_name,
                        ac.constraint_type,
                        ac.search_condition
@@ -453,7 +459,7 @@ class DatabaseConnector:
                 }
                 
                 # Get columns involved in this constraint
-                columns = await self._execute_cursor(cursor, """
+                columns = await self._execute_cursor_fetch(cursor, """
                     SELECT column_name
                     FROM all_cons_columns
                     WHERE owner = :owner
@@ -465,7 +471,7 @@ class DatabaseConnector:
                 
                 # If it's a foreign key, get the referenced table/columns
                 if constraint_type == 'R':
-                    ref_info = await self._execute_cursor(cursor, """
+                    ref_info = await self._execute_cursor_fetch(cursor, """
                         SELECT ac.table_name,
                                acc.column_name
                         FROM all_constraints ac
@@ -504,7 +510,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Get all indexes for the table
-            indexes = await self._execute_cursor(cursor, """
+            indexes = await self._execute_cursor_fetch(cursor, """
                 SELECT ai.index_name,
                        ai.uniqueness,
                        ai.tablespace_name,
@@ -529,7 +535,7 @@ class DatabaseConnector:
                     index_info["status"] = status
                 
                 # Get columns in this index
-                columns = await self._execute_cursor(cursor, """
+                columns = await self._execute_cursor_fetch(cursor, """
                     SELECT column_name
                     FROM all_ind_columns
                     WHERE index_owner = :owner
@@ -552,7 +558,7 @@ class DatabaseConnector:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
             
-            dependencies = await self._execute_cursor(cursor, """
+            dependencies = await self._execute_cursor_fetch(cursor, """
                 WITH deps AS (
                     SELECT /*+ MATERIALIZE */
                            name, type, owner
@@ -598,7 +604,7 @@ class DatabaseConnector:
                 where_clause += " AND type_name LIKE :type_pattern"
                 params["type_pattern"] = type_pattern.upper()
             
-            types = await self._execute_cursor(cursor, f"""
+            types = await self._execute_cursor_fetch(cursor, f"""
                 SELECT type_name, typecode
                 FROM all_types
                 {where_clause}
@@ -616,7 +622,7 @@ class DatabaseConnector:
                 
                 # For object types, get attributes
                 if (typecode == 'OBJECT'):
-                    attrs = await self._execute_cursor(cursor, """
+                    attrs = await self._execute_cursor_fetch(cursor, """
                         SELECT attr_name, attr_type_name
                         FROM all_type_attrs
                         WHERE owner = :owner
@@ -643,7 +649,7 @@ class DatabaseConnector:
             schema = await self._get_effective_schema(conn)
             
             # Get tables referenced by this table
-            referenced_tables_result = await self._execute_cursor(cursor, """
+            referenced_tables_result = await self._execute_cursor_fetch(cursor, """
                 SELECT /*+ RESULT_CACHE LEADING(ac acc) USE_NL(acc) */
                     DISTINCT acc.table_name AS referenced_table
                 FROM all_constraints ac
@@ -657,7 +663,7 @@ class DatabaseConnector:
             referenced_tables = [row[0] for row in referenced_tables_result]
             
             # Get tables that reference this table
-            referencing_tables_result = await self._execute_cursor(cursor, """
+            referencing_tables_result = await self._execute_cursor_fetch(cursor, """
                 WITH pk_constraints AS (
                     SELECT /*+ MATERIALIZE */ constraint_name
                     FROM all_constraints
@@ -690,7 +696,7 @@ class DatabaseConnector:
             cursor = conn.cursor()
             schema = await self._get_effective_schema(conn)
             # Use Oracle's built-in similarity features
-            results = await self._execute_cursor(cursor, """
+            results = await self._execute_cursor_fetch(cursor, """
                 SELECT /*+ RESULT_CACHE */ DISTINCT table_name 
                 FROM all_tables 
                 WHERE owner = :owner
@@ -728,7 +734,7 @@ class DatabaseConnector:
             result = {}
 
             # Get columns for the specified tables that match the search term
-            rows = await self._execute_cursor(cursor, """
+            rows = await self._execute_cursor_fetch(cursor, """
                 SELECT /*+ RESULT_CACHE */ 
                     table_name,
                     column_name,
@@ -773,9 +779,11 @@ class DatabaseConnector:
         try:
             cursor = conn.cursor()
             
+            self._assert_query_executable(sql)
+            
             # Check if this is a SELECT query (has description)
             if self._is_select_query(sql):
-                rows = await self._execute_cursor_with_fetch(cursor, sql, max_rows, **(params or {}))
+                rows = await self._execute_cursor_fetch(cursor, sql, max_rows, **(params or {}))
                 columns = [desc[0] for desc in cursor.description] if cursor.description else []
                 result_rows = [dict(zip(columns, row)) for row in rows]
                 
@@ -822,7 +830,7 @@ class DatabaseConnector:
             await cursor.execute(plan_statement)
             
             # Then retrieve the execution plan with cost and cardinality information
-            plan_rows = await self._execute_cursor(cursor, """
+            plan_rows = await self._execute_cursor_fetch(cursor, """
                 SELECT 
                     LPAD(' ', 2*LEVEL-2) || operation || ' ' || 
                     options || ' ' || object_name || 
@@ -907,46 +915,47 @@ class DatabaseConnector:
 
     @staticmethod
     def _is_select_query(sql: str) -> bool:
-        """Return True if the statement appears to be a *pure* read-only SELECT/CTE.
+        """Return True if the statement is a single, pure SELECT or WITH (CTE) statement.
 
-        Heuristics used (cheap but reasonably safe for most cases):
-        1. Statement must start with SELECT or WITH.
-        2. No semicolon exists elsewhere (prevents stacked statements).
-        3. No DML/DDL keywords appear anywhere in the text (outside quotes is
-           not fully parsed but good enough as a guard-rail). For more robust
-           validation a full SQL parser should be used.
+        Uses sqlparse to robustly parse SQL, preventing stacked statements and bypasses via string literals.
         """
-        stripped = sql.lstrip()
-        upper_sql = stripped.upper()
 
-        if not (upper_sql.startswith("SELECT") or upper_sql.startswith("WITH")):
+        statements = sqlparse.parse(sql)
+        if len(statements) != 1:
+            return False  # Disallow stacked statements
+
+        stmt = statements[0]
+        first_token = stmt.token_first(skip_cm=True)
+        if first_token is None:
             return False
 
-        # block attempts to chain multiple statements
-        if ";" in upper_sql:
-            return False
+        # SELECT statements
+        if first_token.ttype is sqlparse.tokens.DML and first_token.value.upper() == "SELECT":
+            return True
 
-        # simple keyword search for write operations
-        write_pattern = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE)\b", re.IGNORECASE)
-        if write_pattern.search(upper_sql):
-            return False
+        # Common Table Expressions starting with WITH
+        if first_token.ttype is sqlparse.tokens.Keyword and first_token.value.upper() == "WITH":
+            return True
 
-        return True
+        return False
 
     @staticmethod
     def _is_write_operation(sql: str) -> bool:
-        """Return True if the SQL statement modifies data or structure."""
-        stripped = sql.lstrip().upper()
-        write_keywords = (
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "MERGE",
-            "CREATE",
-            "ALTER",
-            "DROP",
-            "TRUNCATE",
-            "GRANT",
-            "REVOKE",
-        )
-        return any(stripped.startswith(keyword) for keyword in write_keywords)
+        """Return True if the SQL statement modifies data or structure, using sqlparse for accuracy."""
+
+        write_ops = {
+            "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER",
+            "DROP", "TRUNCATE", "GRANT", "REVOKE", "REPLACE",
+        }
+
+        statements = sqlparse.parse(sql)
+        if not statements:
+            return False
+
+        # Inspect only the first (and only) statement
+        for token in statements[0].flatten():
+            if (token.ttype in sqlparse.tokens.Keyword.DML or 
+                token.ttype in sqlparse.tokens.Keyword.DDL or
+                (token.ttype in sqlparse.tokens.Keyword and token.value.upper() in write_ops)):
+                return True
+        return False

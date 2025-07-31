@@ -793,6 +793,10 @@ class DatabaseConnector:
                     "row_count": len(result_rows)
                 }
             else:
+                # Double-check read-only mode for non-SELECT statements
+                if self.read_only:
+                    raise PermissionError("Read-only mode: only SELECT and analysis statements are permitted.")
+                    
                 await self._execute_cursor_no_fetch(cursor, sql, **(params or {}))
                 row_count = cursor.rowcount
                 
@@ -937,6 +941,10 @@ class DatabaseConnector:
         if first_token.ttype is sqlparse.tokens.Keyword and first_token.value.upper() == "WITH":
             return True
 
+        # Read-only analysis statements: EXPLAIN, DESCRIBE, SHOW
+        if first_token.ttype is sqlparse.tokens.Keyword and first_token.value.upper() in {"EXPLAIN", "DESCRIBE", "SHOW"}:
+            return True
+
         return False
 
     @staticmethod
@@ -949,13 +957,17 @@ class DatabaseConnector:
         }
 
         statements = sqlparse.parse(sql)
-        if not statements:
+        if not statements or len(statements) != 1:
+            return False  # Disallow empty or stacked statements
+
+        stmt = statements[0]
+        first_token = stmt.token_first(skip_cm=True)
+        if first_token is None:
             return False
 
-        # Inspect only the first (and only) statement
-        for token in statements[0].flatten():
-            if (token.ttype in sqlparse.tokens.Keyword.DML or 
-                token.ttype in sqlparse.tokens.Keyword.DDL or
-                (token.ttype in sqlparse.tokens.Keyword and token.value.upper() in write_ops)):
-                return True
+        # Check if the first meaningful token matches a write operation
+        if (first_token.ttype in sqlparse.tokens.Keyword.DML or 
+            first_token.ttype in sqlparse.tokens.Keyword.DDL or
+            (first_token.ttype in sqlparse.tokens.Keyword and first_token.value.upper() in write_ops)):
+            return True
         return False

@@ -14,7 +14,9 @@ dependencies = [
 dev = [
     "black",
     "mypy",
-    "ruff"
+    "ruff",
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0"
 ]
 
 [tool.ruff]
@@ -24,3 +26,7 @@ line-length = 88
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

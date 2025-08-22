@@ -923,26 +923,37 @@ class DatabaseConnector:
 
         Uses sqlparse to robustly parse SQL, preventing stacked statements and bypasses via string literals.
         """
+        sql_stripped = sql.strip()
+        if not sql_stripped:
+            return False
 
         statements = sqlparse.parse(sql)
         if len(statements) != 1:
-            return False  # Disallow stacked statements
+            return False  # stacked / multiple statements
 
         stmt = statements[0]
         first_token = stmt.token_first(skip_cm=True)
         if first_token is None:
             return False
 
-        # SELECT statements
-        if first_token.ttype is sqlparse.tokens.DML and first_token.value.upper() == "SELECT":
+        first_val = first_token.value.upper()
+
+        # Use sqlparse's statement type when available for robustness (handles CTEs)
+        stmt_type = None
+        try:
+            stmt_type = stmt.get_type()  # Often returns 'SELECT' for WITH/SELECT
+        except Exception:  # pragma: no cover - defensive
+            stmt_type = None
+
+        if stmt_type == 'SELECT':
             return True
 
-        # Common Table Expressions starting with WITH
-        if first_token.ttype is sqlparse.tokens.Keyword and first_token.value.upper() == "WITH":
+        # Fallback explicit checks
+        if first_val in {"SELECT", "WITH"}:
             return True
 
-        # Read-only analysis statements: EXPLAIN, DESCRIBE, SHOW
-        if first_token.ttype is sqlparse.tokens.Keyword and first_token.value.upper() in {"EXPLAIN", "DESCRIBE", "SHOW"}:
+        # Read-only analysis style commands still treated as safe
+        if first_val in {"EXPLAIN", "DESCRIBE", "SHOW"}:
             return True
 
         return False
@@ -950,7 +961,6 @@ class DatabaseConnector:
     @staticmethod
     def _is_write_operation(sql: str) -> bool:
         """Return True if the SQL statement modifies data or structure, using sqlparse for accuracy."""
-
         write_ops = {
             "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER",
             "DROP", "TRUNCATE", "GRANT", "REVOKE", "REPLACE",
@@ -958,16 +968,20 @@ class DatabaseConnector:
 
         statements = sqlparse.parse(sql)
         if not statements or len(statements) != 1:
-            return False  # Disallow empty or stacked statements
+            return False
 
         stmt = statements[0]
         first_token = stmt.token_first(skip_cm=True)
         if first_token is None:
             return False
 
-        # Check if the first meaningful token matches a write operation
-        if (first_token.ttype in sqlparse.tokens.Keyword.DML or 
-            first_token.ttype in sqlparse.tokens.Keyword.DDL or
-            (first_token.ttype in sqlparse.tokens.Keyword and first_token.value.upper() in write_ops)):
+        first_val = first_token.value.upper()
+
+        # Explicitly exclude read-only leading tokens before generic DML/DDL classification
+        if first_val in {"SELECT", "WITH", "EXPLAIN", "DESCRIBE", "SHOW"}:
+            return False
+
+        if (first_token.ttype in (sqlparse.tokens.Keyword.DML, sqlparse.tokens.Keyword.DDL)
+                or (first_token.ttype in sqlparse.tokens.Keyword and first_val in write_ops)):
             return True
         return False

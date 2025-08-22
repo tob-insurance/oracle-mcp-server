@@ -461,21 +461,51 @@ async def run_sql_query(sql: str, ctx: Context, max_rows: int = 100) -> str:
     
     try:
         result = await db_context.run_sql_query(sql, max_rows=max_rows)
-        
         if not result.get("rows"):
+            # Write or empty read response
             if "message" in result:
-                return result["message"]
-            return "Query executed successfully, but returned no rows."
-            
+                return wrap_untrusted(result["message"])  # keep consistency
+            return wrap_untrusted("Query executed successfully, but returned no rows.")
         formatted_result = format_sql_query_result(result)
         return wrap_untrusted(formatted_result)
-        
-    except oracledb.Error as e:
-        return wrap_untrusted(f"Database error: {str(e)}")
     except PermissionError as e:
-        return wrap_untrusted(f"Permission error: {str(e)}")
+        return wrap_untrusted(f"Permission error: {e}")
+    except oracledb.Error as e:
+        return wrap_untrusted(f"Database error: {e}")
     except Exception as e:
-        return wrap_untrusted(f"Error executing query: {str(e)}")
+        return wrap_untrusted(f"Unexpected error executing query: {e}")
+
+@mcp.tool()
+async def explain_query_plan(sql: str, ctx: Context) -> str:
+    """Obtain an execution plan for a SELECT/CTE.
+
+    Read-only mode note: The underlying Oracle mechanism uses PLAN_TABLE and
+    cleanup (DELETE) statements; on locked-down or strictly read-only accounts
+    this may fail. If so, a structured error is returned instead of a plan.
+
+    Use: Pre-flight cost / access path inspection before running large queries.
+    Avoid: High frequency calls in loops.
+    """
+    db_context: DatabaseContext = ctx.request_context.lifespan_context
+    try:
+        plan = await db_context.explain_query_plan(sql)
+        # Standardize error wrapping
+        if plan.get("error"):
+            return wrap_untrusted(f"Explain plan unavailable: {plan['error']}")
+        if not plan.get("execution_plan"):
+            return wrap_untrusted("No execution plan rows returned.")
+        lines = ["Execution Plan:"] + [f"  {step}" for step in plan["execution_plan"]]
+        if plan.get("optimization_suggestions"):
+            lines.append("\nSuggestions:")
+            for s in plan["optimization_suggestions"]:
+                lines.append(f"  - {s}")
+        return wrap_untrusted("\n".join(lines))
+    except PermissionError as e:
+        return wrap_untrusted(f"Permission error: {e}")
+    except oracledb.Error as e:
+        return wrap_untrusted(f"Database error obtaining plan: {e}")
+    except Exception as e:
+        return wrap_untrusted(f"Unexpected error obtaining plan: {e}")
 
 if __name__ == "__main__":
     mcp.run()

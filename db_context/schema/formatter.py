@@ -90,8 +90,10 @@ from collections import defaultdict
 
 # Configuration constants
 RELATIONSHIP_GROUPING_THRESHOLD = 10  # Number of relationships before grouping is applied
-COLUMN_GROUPING_THRESHOLD = 20     # Number of columns before compact format is used
-MIN_PREFIX_LENGTH = 3              # Minimum length for meaningful prefix grouping
+COLUMN_GROUPING_THRESHOLD = 20        # Number of columns before compact format is used
+MIN_PREFIX_LENGTH = 3                 # Minimum length for meaningful prefix grouping
+# Output safety/UX limits
+MAX_CELL_WIDTH = 120                  # Truncate very wide cell values to prevent token bloat / prompt abuse
 
 def format_schema(table_name: str, columns: List[Dict[str, Any]], 
                 relationships: Dict[str, Dict[str, Any]]) -> str:
@@ -377,35 +379,52 @@ def format_sql_query_result(result: Dict[str, Any]) -> str:
     headers = [str(h) for h in result["columns"]]
     rows = result["rows"]
 
-    # Determine the maximum width required for each column considering both header and cell values
-    col_widths: List[int] = []
-    for header in headers:
-        max_width = len(header)
-        for row in rows:
-            cell_len = len(str(row.get(header, "")))
-            if cell_len > max_width:
-                max_width = cell_len
-        col_widths.append(max_width)
+    def _escape(val: Any) -> str:
+        if val is None:
+            return ""
+        s = str(val)
+        # Normalize whitespace to single spaces to avoid multi-line table injection
+        s = s.replace("\r", " ").replace("\n", " ")
+        # Truncate overly long values
+        truncated = False
+        if len(s) > MAX_CELL_WIDTH:
+            s = s[: MAX_CELL_WIDTH - 1] + "…"
+            truncated = True
+        # Escape pipe which breaks markdown tables
+        s = s.replace("|", "\\|")
+        # Backticks sometimes cause rendering issues inside larger markdown contexts
+        s = s.replace("`", "'")
+        return s, truncated
+
+    # Preprocess cells to apply escaping + truncation and compute widths
+    processed_rows: List[List[str]] = []
+    truncated_any = False
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        processed_row: List[str] = []
+        for idx, header in enumerate(headers):
+            cell_raw = row.get(header, "")
+            cell, was_trunc = _escape(cell_raw)
+            if was_trunc:
+                truncated_any = True
+            processed_row.append(cell)
+            if len(cell) > col_widths[idx]:
+                col_widths[idx] = len(cell)
+        processed_rows.append(processed_row)
 
     def _pad(cell: str, width: int) -> str:
-        """Left-justify cell content (right-pad) to match the column width for aligned output."""
         return cell.ljust(width)
 
-    formatted_result: List[str] = []
+    lines: List[str] = []
+    # Header
+    lines.append("| " + " | ".join(_pad(h, col_widths[i]) for i, h in enumerate(headers)) + " |")
+    # Separator
+    lines.append("| " + " | ".join("-" * max(3, col_widths[i]) for i in range(len(headers))) + " |")
+    # Data
+    for prow in processed_rows:
+        lines.append("| " + " | ".join(_pad(prow[i], col_widths[i]) for i in range(len(headers))) + " |")
 
-    # Header row
-    header_row = "| " + " | ".join(_pad(h, col_widths[i]) for i, h in enumerate(headers)) + " |"
-    formatted_result.append(header_row)
+    if truncated_any:
+        lines.append("\nNote: Some values truncated to " + str(MAX_CELL_WIDTH) + " chars (…)")
 
-    # Separator row – must have at least 3 dashes per Markdown spec
-    separator_row = "| " + " | ".join("-" * max(3, col_widths[i]) for i in range(len(headers))) + " |"
-    formatted_result.append(separator_row)
-
-    # Data rows
-    for row in rows:
-        data_row = "| " + " | ".join(
-            _pad(str(row.get(h, "")), col_widths[i]) for i, h in enumerate(headers)
-        ) + " |"
-        formatted_result.append(data_row)
-
-    return "\n".join(formatted_result)
+    return "\n".join(lines)

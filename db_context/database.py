@@ -668,15 +668,14 @@ class DatabaseConnector:
                     SELECT /*+ MATERIALIZE */ constraint_name
                     FROM all_constraints
                     WHERE table_name = :table_name
-                    AND constraint_type IN ('P', 'U')
-                    AND owner = :owner
+                      AND constraint_type IN ('P', 'U')
+                      AND owner = :owner
                 )
-                SELECT /*+ RESULT_CACHE LEADING(ac pk) USE_NL(pk) */
-                    DISTINCT ac.table_name AS referencing_table
-                FROM pk_constraints
+                SELECT /*+ RESULT_CACHE LEADING(ac pk) USE_NL(pk) */ DISTINCT ac.table_name AS referencing_table
+                FROM all_constraints ac
                 JOIN pk_constraints pk ON ac.r_constraint_name = pk.constraint_name
                 WHERE ac.constraint_type = 'R'
-                AND ac.owner = :owner
+                  AND ac.owner = :owner
             """, table_name=table_name.upper(), owner=schema)
             
             referencing_tables = [row[0] for row in referencing_tables_result]

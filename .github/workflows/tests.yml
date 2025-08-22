@@ -8,8 +8,7 @@ on:
 
 jobs:
   unit-tests:
-    name: Unit Tests (push only)
-    if: github.event_name == 'push'
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -31,6 +30,7 @@ jobs:
   integration-tests:
     name: Integration Tests (PR only)
     if: github.event_name == 'pull_request'
+    needs: unit-tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services: {}

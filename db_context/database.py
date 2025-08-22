@@ -646,44 +646,55 @@ class DatabaseConnector:
         conn = await self.get_connection()
         try:
             cursor = conn.cursor()
+            requested_table = table_name.upper()
             schema = await self._get_effective_schema(conn)
-            
-            # Get tables referenced by this table
-            referenced_tables_result = await self._execute_cursor_fetch(cursor, """
-                SELECT /*+ RESULT_CACHE LEADING(ac acc) USE_NL(acc) */
-                    DISTINCT acc.table_name AS referenced_table
-                FROM all_constraints ac
-                JOIN all_cons_columns acc ON acc.constraint_name = ac.r_constraint_name
-                    AND acc.owner = ac.owner
-                WHERE ac.constraint_type = 'R'
-                AND ac.table_name = :table_name
-                AND ac.owner = :owner
-            """, table_name=table_name.upper(), owner=schema)
-            
-            referenced_tables = [row[0] for row in referenced_tables_result]
-            
-            # Get tables that reference this table
-            referencing_tables_result = await self._execute_cursor_fetch(cursor, """
-                WITH pk_constraints AS (
-                    SELECT /*+ MATERIALIZE */ constraint_name
-                    FROM all_constraints
-                    WHERE table_name = :table_name
-                      AND constraint_type IN ('P', 'U')
-                      AND owner = :owner
-                )
-                SELECT /*+ RESULT_CACHE LEADING(ac pk) USE_NL(pk) */ DISTINCT ac.table_name AS referencing_table
-                FROM all_constraints ac
-                JOIN pk_constraints pk ON ac.r_constraint_name = pk.constraint_name
-                WHERE ac.constraint_type = 'R'
-                  AND ac.owner = :owner
-            """, table_name=table_name.upper(), owner=schema)
-            
-            referencing_tables = [row[0] for row in referencing_tables_result]
-            
-            return {
-                'referenced_tables': referenced_tables,
-                'referencing_tables': referencing_tables
-            }
+
+            # Helper to run the two directional queries for a given owner
+            async def _run_for_owner(owner: str):
+                # Tables this table references (parent tables)
+                ref_rows = await self._execute_cursor_fetch(cursor, """
+                    SELECT /*+ RESULT_CACHE */ DISTINCT parent_cols.table_name
+                    FROM all_constraints fk
+                    JOIN all_constraints pk
+                      ON pk.constraint_name = fk.r_constraint_name
+                     AND pk.owner = fk.r_owner
+                    JOIN all_cons_columns parent_cols
+                      ON parent_cols.constraint_name = pk.constraint_name
+                     AND parent_cols.owner = pk.owner
+                    WHERE fk.constraint_type = 'R'
+                      AND fk.table_name = :table_name
+                      AND fk.owner = :owner
+                """, table_name=requested_table, owner=owner)
+
+                # Tables that reference this table (child tables)
+                referencing_rows = await self._execute_cursor_fetch(cursor, """
+                    SELECT /*+ RESULT_CACHE */ DISTINCT fk.table_name
+                    FROM all_constraints pk
+                    JOIN all_constraints fk
+                      ON fk.r_constraint_name = pk.constraint_name
+                     AND fk.r_owner = pk.owner
+                    WHERE pk.constraint_type IN ('P','U')
+                      AND pk.table_name = :table_name
+                      AND pk.owner = :owner
+                      AND fk.constraint_type = 'R'
+                """, table_name=requested_table, owner=owner)
+
+                return [r[0] for r in ref_rows], [r[0] for r in referencing_rows]
+
+            # First attempt with the effective schema (target_schema or connection user)
+            referenced_tables, referencing_tables = await _run_for_owner(schema)
+
+            # If nothing found at all, attempt to discover actual owner of the table and retry once
+            if not referenced_tables and not referencing_tables:
+                owner_rows = await self._execute_cursor_fetch(cursor, """
+                    SELECT DISTINCT owner FROM all_tables WHERE table_name = :table_name
+                """, table_name=requested_table)
+                if owner_rows:
+                    actual_owner = owner_rows[0][0]
+                    if actual_owner and actual_owner.upper() != schema:
+                        referenced_tables, referencing_tables = await _run_for_owner(actual_owner.upper())
+
+            return { 'referenced_tables': referenced_tables, 'referencing_tables': referencing_tables }
             
         finally:
             await self._close_connection(conn)

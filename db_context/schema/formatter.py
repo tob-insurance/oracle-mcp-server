@@ -90,8 +90,10 @@ from collections import defaultdict
 
 # Configuration constants
 RELATIONSHIP_GROUPING_THRESHOLD = 10  # Number of relationships before grouping is applied
-COLUMN_GROUPING_THRESHOLD = 20     # Number of columns before compact format is used
-MIN_PREFIX_LENGTH = 3              # Minimum length for meaningful prefix grouping
+COLUMN_GROUPING_THRESHOLD = 20        # Number of columns before compact format is used
+MIN_PREFIX_LENGTH = 3                 # Minimum length for meaningful prefix grouping
+# Output safety/UX limits
+MAX_CELL_WIDTH = 120                  # Truncate very wide cell values to prevent token bloat / prompt abuse
 
 def format_schema(table_name: str, columns: List[Dict[str, Any]], 
                 relationships: Dict[str, Dict[str, Any]]) -> str:
@@ -360,3 +362,69 @@ def _format_relationship_groups(groups: List[Dict[str, Any]], result: List[str])
             result.append(f"    - {group['pattern']}:")
             for pattern in sorted(group['column_patterns']):
                 result.append(f"      {pattern}")
+
+def format_sql_query_result(result: Dict[str, Any]) -> str:
+    """
+    Format SQL query results as a markdown table.
+    
+    Args:
+        result: Dictionary containing query results with 'columns' and 'rows' keys
+        
+    Returns:
+        Formatted markdown table string
+    """
+    if not result.get("rows"):
+        return "Query executed successfully, but returned no rows."
+
+    headers = [str(h) for h in result["columns"]]
+    rows = result["rows"]
+
+    def _escape(val: Any) -> str:
+        if val is None:
+            return ""
+        s = str(val)
+        # Normalize whitespace to single spaces to avoid multi-line table injection
+        s = s.replace("\r", " ").replace("\n", " ")
+        # Truncate overly long values
+        truncated = False
+        if len(s) > MAX_CELL_WIDTH:
+            s = s[: MAX_CELL_WIDTH - 1] + "…"
+            truncated = True
+        # Escape pipe which breaks markdown tables
+        s = s.replace("|", "\\|")
+        # Backticks sometimes cause rendering issues inside larger markdown contexts
+        s = s.replace("`", "'")
+        return s, truncated
+
+    # Preprocess cells to apply escaping + truncation and compute widths
+    processed_rows: List[List[str]] = []
+    truncated_any = False
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        processed_row: List[str] = []
+        for idx, header in enumerate(headers):
+            cell_raw = row.get(header, "")
+            cell, was_trunc = _escape(cell_raw)
+            if was_trunc:
+                truncated_any = True
+            processed_row.append(cell)
+            if len(cell) > col_widths[idx]:
+                col_widths[idx] = len(cell)
+        processed_rows.append(processed_row)
+
+    def _pad(cell: str, width: int) -> str:
+        return cell.ljust(width)
+
+    lines: List[str] = []
+    # Header
+    lines.append("| " + " | ".join(_pad(h, col_widths[i]) for i, h in enumerate(headers)) + " |")
+    # Separator
+    lines.append("| " + " | ".join("-" * max(3, col_widths[i]) for i in range(len(headers))) + " |")
+    # Data
+    for prow in processed_rows:
+        lines.append("| " + " | ".join(_pad(prow[i], col_widths[i]) for i in range(len(headers))) + " |")
+
+    if truncated_any:
+        lines.append("\nNote: Some values truncated to " + str(MAX_CELL_WIDTH) + " chars (…)")
+
+    return "\n".join(lines)

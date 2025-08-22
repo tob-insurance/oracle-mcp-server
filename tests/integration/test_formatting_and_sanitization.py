@@ -2,7 +2,7 @@ import re
 import pytest
 from db_context import DatabaseContext
 from db_context.schema.formatter import format_sql_query_result
-from main import wrap_untrusted
+from db_context.utils import wrap_untrusted
 
 pytestmark = pytest.mark.asyncio
 

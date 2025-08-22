@@ -1,5 +1,5 @@
 import re
-from main import wrap_untrusted
+from db_context.utils import wrap_untrusted
 
 
 def test_wrap_untrusted_basic():

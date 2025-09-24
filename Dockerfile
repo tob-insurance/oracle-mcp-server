@@ -12,23 +12,23 @@ WORKDIR /opt/oracle
 # Set up architecture-specific variables
 ARG TARGETARCH
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
-        ORACLE_CLIENT_URL="https://download.oracle.com/otn_software/linux/instantclient/2370000/instantclient-basic-linux.x64-23.7.0.25.01.zip"; \
+    ORACLE_CLIENT_URL="https://download.oracle.com/otn_software/linux/instantclient/1928000/instantclient-basic-linux.x64-19.28.0.0.0dbru.zip"; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
-        ORACLE_CLIENT_URL="https://download.oracle.com/otn_software/linux/instantclient/2370000/instantclient-basic-linux.arm64-23.7.0.25.01.zip"; \
+    ORACLE_CLIENT_URL="https://download.oracle.com/otn_software/linux/instantclient/1928000/instantclient-basic-linux.arm64-19.28.0.0.0dbru.zip"; \
     else \
-        echo "Unsupported architecture: $TARGETARCH" && exit 1; \
+    echo "Unsupported architecture: $TARGETARCH" && exit 1; \
     fi && \
-    echo "Downloading Oracle Instant Client 23.7 for $TARGETARCH" && \
+    echo "Downloading Oracle Instant Client 19c for $TARGETARCH" && \
     curl -o instantclient.zip $ORACLE_CLIENT_URL && \
     unzip instantclient.zip && \
     rm instantclient.zip && \
     cd instantclient* && \
-    echo /opt/oracle/instantclient_23_7 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+    echo /opt/oracle/instantclient_19_28 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
     ldconfig
 
 # Set Oracle environment variables
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_7:$LD_LIBRARY_PATH
-ENV ORACLE_HOME=/opt/oracle/instantclient_23_7
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_19_28:$LD_LIBRARY_PATH
+ENV ORACLE_HOME=/opt/oracle/instantclient_19_28
 ENV DPI_DEBUG_LEVEL=64
 
 # Copy the project into the image

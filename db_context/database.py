@@ -25,7 +25,8 @@ class DatabaseConnector:
         self.read_only = read_only
         self._pool = None
         self._pool_lock = asyncio.Lock()
-        
+        self._oracle_version = None  # Cache for Oracle version detection
+
         if self.thick_mode:
             try:
                 if lib_dir:
@@ -38,11 +39,70 @@ class DatabaseConnector:
                 print("Falling back to thin mode", file=sys.stderr)
                 self.thick_mode = False
 
+    async def _detect_oracle_version(self) -> str:
+        """Detect Oracle database version and cache the result"""
+        if self._oracle_version is not None:
+            return self._oracle_version
+
+        try:
+            # Create a temporary connection for version detection
+            if self.thick_mode:
+                temp_conn = oracledb.connect(self.connection_string)
+            else:
+                temp_conn = await oracledb.connect_async(self.connection_string)
+
+            try:
+                cursor = temp_conn.cursor()
+                if self.thick_mode:
+                    cursor.execute("SELECT banner FROM v$version WHERE ROWNUM = 1")
+                    result = cursor.fetchone()
+                else:
+                    await cursor.execute("SELECT banner FROM v$version WHERE ROWNUM = 1")
+                    result = await cursor.fetchone()
+
+                if result and result[0]:
+                    self._oracle_version = result[0]
+                    print(f"Detected Oracle version: {self._oracle_version}", file=sys.stderr)
+                else:
+                    self._oracle_version = "Unknown"
+            finally:
+                if self.thick_mode:
+                    temp_conn.close()
+                else:
+                    await temp_conn.close()
+        except Exception as e:
+            print(f"Error detecting Oracle version: {e}", file=sys.stderr)
+            self._oracle_version = "Unknown"
+
+        return self._oracle_version
+
+    async def _check_11g_compatibility(self):
+        """Check if we're connecting to Oracle 11g and force thick mode if necessary"""
+        version = await self._detect_oracle_version()
+
+        # Check if this is Oracle 11g
+        if version and ("11." in version or "Oracle Database 11g" in version):
+            print("Oracle 11g detected - thick mode required for compatibility", file=sys.stderr)
+
+            # Force thick mode for 11g databases
+            if not self.thick_mode:
+                print("Enabling thick mode for Oracle 11g compatibility", file=sys.stderr)
+                self.thick_mode = True
+                try:
+                    oracledb.init_oracle_client()
+                    print("Oracle Client initialized in thick mode for 11g", file=sys.stderr)
+                except Exception as e:
+                    print(f"Failed to initialize thick mode for 11g: {e}", file=sys.stderr)
+                    raise ConnectionError(f"Oracle 11g requires thick mode but initialization failed: {e}")
+
     async def initialize_pool(self):
         """Initialize the connection pool"""
         async with self._pool_lock:
             if self._pool is None:
                 try:
+                    # Check for 11g and force thick mode if needed
+                    await self._check_11g_compatibility()
+
                     if self.thick_mode:
                         self._pool = oracledb.create_pool(
                             self.connection_string,
@@ -60,6 +120,26 @@ class DatabaseConnector:
                             getmode=oracledb.POOL_GETMODE_WAIT
                         )
                     print("Database connection pool initialized", file=sys.stderr)
+                except oracledb.Error as e:
+                    error_msg = str(e)
+                    # Handle Oracle 11g authentication issues
+                    if "DPY-3015" in error_msg:
+                        raise ConnectionError(
+                            "Oracle 11g authentication error: Password verifier incompatibility. "
+                            "This usually occurs with old password formats. Solutions: "
+                            "1) Regenerate the user password in Oracle 11g, or "
+                            "2) Ensure thick mode is enabled (automatically done for 11g), or "
+                            "3) Contact your database administrator to update password verifiers."
+                        )
+                    elif "11." in error_msg or any("11g" in error_msg.lower() for _ in [error_msg]):
+                        raise ConnectionError(
+                            f"Oracle 11g connection error: {error_msg}. "
+                            "Oracle 11g requires thick mode for proper connectivity. "
+                            "Ensure Oracle Instant Client libraries are properly installed."
+                        )
+                    else:
+                        print(f"Error creating connection pool: {e}", file=sys.stderr)
+                        raise
                 except Exception as e:
                     print(f"Error creating connection pool: {e}", file=sys.stderr)
                     raise
@@ -74,6 +154,19 @@ class DatabaseConnector:
                 return self._pool.acquire()
             else:
                 return await self._pool.acquire()
+        except oracledb.Error as e:
+            error_msg = str(e)
+            # Handle Oracle 11g authentication issues at connection time
+            if "DPY-3015" in error_msg:
+                raise ConnectionError(
+                    "Oracle 11g authentication error: Password verifier incompatibility. "
+                    "This usually occurs with old password formats. Solutions: "
+                    "1) Regenerate the user password in Oracle 11g, or "
+                    "2) Contact your database administrator to update password verifiers."
+                )
+            else:
+                print(f"Error acquiring connection from pool: {e}", file=sys.stderr)
+                raise
         except Exception as e:
             print(f"Error acquiring connection from pool: {e}", file=sys.stderr)
             raise

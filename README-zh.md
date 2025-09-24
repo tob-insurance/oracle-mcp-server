@@ -348,14 +348,14 @@ ORDERS 表与哪些表有关联？
 - 没有管理员权限将 Oracle Client 安装在标准位置
 - 需要特定的 Oracle Client 版本以兼容某些数据库功能
 
-注意：使用 Docker 时无需担心 Oracle Client 库的安装，容器已包含（Oracle Instant Client v23.7）。该容器支持 19c 至 23ai 版本的 Oracle 数据库，兼容 linux/arm64 和 linux/amd64 架构。
+注意：使用 Docker 时无需担心 Oracle Client 库的安装，容器已包含（Oracle Instant Client v19c）。该容器支持 11g 至 23ai 版本的 Oracle 数据库，兼容 linux/arm64 和 linux/amd64 架构。
 
 ## 系统要求
 
 - **Python**：3.12 或更高版本（为获得最佳性能）
 - **内存**：大型数据库（1 万+表）建议 4GB 以上可用内存
 - **磁盘**：结构缓存至少需 500MB 可用空间
-- **Oracle**：兼容 Oracle Database 11g 及以上
+- **Oracle**：兼容 Oracle Database 11g 及以上（Oracle 11g 需要 thick 模式，检测到时会自动启用）
 - **网络**：与 Oracle 数据库服务器的稳定连接
 
 ## 性能注意事项

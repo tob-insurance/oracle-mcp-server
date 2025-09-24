@@ -361,7 +361,7 @@ You can specify a custom location for the Oracle Client libraries using the `ORA
 - You don't have administrative privileges to install Oracle Client in standard locations
 - You need specific Oracle Client versions for compatibility with certain database features
 
-Note: When using Docker, you don't need to worry about installing Oracle Client libraries as they are included in the container (Oracle Instant Client v23.7). The container supports Oracle databases versions 19c up to 23ai in both linux/arm64 and linux/amd64 architectures.
+Note: When using Docker, you don't need to worry about installing Oracle Client libraries as they are included in the container (Oracle Instant Client v19c). The container supports Oracle databases versions 11g up to 23ai in both linux/arm64 and linux/amd64 architectures.
 
 ## Read-Only Mode
 
@@ -377,7 +377,7 @@ The MCP server operates in read-only mode by default for increased security. Thi
 - **Python**: Version 3.12 or higher (required for optimal performance)
 - **Memory**: 4GB+ available RAM for large databases (10,000+ tables)
 - **Disk**: Minimum 500MB free space for schema cache
-- **Oracle**: Compatible with Oracle Database 11g and higher
+- **Oracle**: Compatible with Oracle Database 11g and higher (Oracle 11g requires thick mode, automatically enabled when detected)
 - **Network**: Stable connection to Oracle database server
 
 ## Performance Considerations

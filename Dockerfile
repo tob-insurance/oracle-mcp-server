@@ -27,7 +27,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     ldconfig
 
 # Set Oracle environment variables
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_19_28:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_19_28
 ENV ORACLE_HOME=/opt/oracle/instantclient_19_28
 ENV DPI_DEBUG_LEVEL=64
 

@@ -205,51 +205,19 @@ class SchemaManager(SchemaManagerProtocol):
         """Search for columns matching the given pattern across all tables"""
         if not self.cache:
             await self.initialize()
-            
+
         search_term = search_term.upper()
-        result = {}
-        
-        # First check in cached tables to avoid database queries for already loaded tables
-        for table_name, table_info in self.cache.tables.items():
-            if not table_info.fully_loaded:
-                continue
-                
-            for column in table_info.columns:
-                if search_term in column["name"].upper():
-                    if table_name not in result:
-                        result[table_name] = []
-                    result[table_name].append(column)
-        
-        # If we don't have enough results, search in uncached tables
-        if len(result) < limit:
-            uncached_tables = [
-                t for t in self.cache.all_table_names 
-                if t not in self.cache.tables or not self.cache.tables[t].fully_loaded
-            ]
-            
-            if uncached_tables:
-                try:
-                    # Search for columns in uncached tables using database connector
-                    db_results = await self.db_connector.search_columns_in_database(uncached_tables, search_term)
-                    
-                    # Merge database results with cache results
-                    for table_name, columns in db_results.items():
-                        if table_name not in result:  # Only add if not already in cache results
-                            result[table_name] = columns
-                            
-                            # Update cache with the new column information
-                            if table_name not in self.cache.tables:
-                                self.cache.tables[table_name] = TableInfo(
-                                    columns=columns,
-                                    relationships={},
-                                    fully_loaded=True
-                                )
-                                await self.save_cache()
-                                
-                except Exception as e:
-                    print(f"Error during database column search: {str(e)}", file=sys.stderr)
-        
-        return dict(list(result.items())[:limit])
+
+        # Search directly in database for all tables
+        try:
+            result = await self.db_connector.search_columns_in_database(
+                list(self.cache.all_table_names),
+                search_term
+            )
+            return dict(list(result.items())[:limit])
+        except Exception as e:
+            print(f"Error during database column search: {str(e)}", file=sys.stderr)
+            return {}
 
     async def initialize(self) -> None:
         """Initialize the database context and build initial cache"""
